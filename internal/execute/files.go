@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"jev-file-sort/internal/model"
+	"jev-file-sort/internal/plan"
 )
 
 func copyAndRemove(source, destination string, kind model.EntryKind) error {
@@ -67,6 +68,17 @@ func copyFileAndRemove(source, destination string) error {
 		os.Remove(destination)
 		return err
 	}
+	sourceFingerprint, err := plan.FingerprintPath(source, model.EntryFile)
+	if err != nil {
+		return err
+	}
+	destinationFingerprint, err := plan.FingerprintPath(destination, model.EntryFile)
+	if err != nil {
+		return err
+	}
+	if !sameContent(sourceFingerprint, destinationFingerprint) {
+		return fmt.Errorf("source changed while it was being copied; both copies were retained")
+	}
 	if err := os.Remove(source); err != nil {
 		return fmt.Errorf("destination copied but source removal failed: %w", err)
 	}
@@ -81,12 +93,6 @@ func copyDirectoryAndRemove(source, destination string) error {
 	if err := os.Mkdir(destination, info.Mode().Perm()); err != nil {
 		return err
 	}
-	completed := false
-	defer func() {
-		if !completed {
-			os.RemoveAll(destination)
-		}
-	}()
 	err = filepath.WalkDir(source, func(current string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -124,11 +130,25 @@ func copyDirectoryAndRemove(source, destination string) error {
 	if err := os.Chtimes(destination, info.ModTime(), info.ModTime()); err != nil {
 		return err
 	}
+	sourceFingerprint, err := plan.FingerprintPath(source, model.EntryFolder)
+	if err != nil {
+		return err
+	}
+	destinationFingerprint, err := plan.FingerprintPath(destination, model.EntryFolder)
+	if err != nil {
+		return err
+	}
+	if !sameContent(sourceFingerprint, destinationFingerprint) {
+		return fmt.Errorf("source folder changed while it was being copied; both copies were retained")
+	}
 	if err := os.RemoveAll(source); err != nil {
 		return fmt.Errorf("destination copied but source removal failed: %w", err)
 	}
-	completed = true
 	return nil
+}
+
+func sameContent(left, right model.Fingerprint) bool {
+	return left.SHA256 == right.SHA256 && left.Size == right.Size && left.EntryCount == right.EntryCount
 }
 
 func copyFileWithoutRemove(source, destination string, info os.FileInfo) error {
