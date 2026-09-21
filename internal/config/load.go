@@ -98,8 +98,14 @@ func merge(dst *Config, src Config) {
 	for _, category := range src.Categories {
 		mergeCategory(&dst.Categories, category)
 	}
+	var additions []Rule
 	for _, rule := range src.Rules {
-		mergeRule(&dst.Rules, rule)
+		if !mergeRule(&dst.Rules, rule) {
+			additions = append(additions, rule)
+		}
+	}
+	if len(additions) > 0 {
+		dst.Rules = append(additions, dst.Rules...)
 	}
 }
 
@@ -183,7 +189,7 @@ func mergeCategory(categories *[]Category, src Category) {
 	*categories = append(*categories, src)
 }
 
-func mergeRule(rules *[]Rule, src Rule) {
+func mergeRule(rules *[]Rule, src Rule) bool {
 	for i := range *rules {
 		if (*rules)[i].ID != src.ID {
 			continue
@@ -210,7 +216,7 @@ func mergeRule(rules *[]Rule, src Rule) {
 		if src.Category != "" {
 			dst.Category = src.Category
 		}
-		return
+		return true
 	}
-	*rules = append([]Rule{src}, *rules...)
+	return false
 }
