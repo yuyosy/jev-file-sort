@@ -145,6 +145,8 @@ func (m Model) updatePlan(key string) (tea.Model, tea.Cmd) {
 		m.openCategoryChooser()
 	case "m":
 		m.openModeChooser()
+	case "f":
+		m.openFolderModeChooser()
 	case "a":
 		m.overlay = "apply"
 	case "h":
@@ -229,6 +231,21 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.overlay == "folder-mode" {
+		switch key {
+		case "up", "k":
+			if m.chooser > 0 {
+				m.chooser--
+			}
+		case "down", "j":
+			if m.chooser < 1 {
+				m.chooser++
+			}
+		case "enter":
+			return m.selectFolderMode()
+		}
+		return m, nil
+	}
 	if key != "enter" && key != "y" {
 		return m, nil
 	}
@@ -261,6 +278,40 @@ func (m *Model) openModeChooser() {
 		m.chooser = 1
 	}
 	m.overlay = "mode"
+}
+
+func (m *Model) openFolderModeChooser() {
+	if m.config.Mode != "jev" {
+		m.notice = "Folder evaluation is available in Jev mode."
+		m.overlay = "notice"
+		return
+	}
+	m.chooser = 0
+	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+		m.chooser = 1
+	}
+	m.overlay = "folder-mode"
+}
+
+func (m Model) selectFolderMode() (tea.Model, tea.Cmd) {
+	enabled := m.chooser == 1
+	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) == enabled {
+		m.overlay = ""
+		return m, nil
+	}
+	nextConfig := m.config
+	nextConfig.Jev.FolderEvaluation.Enabled = config.Bool(enabled)
+	classifier, err := m.classifierFactory(nextConfig)
+	if err != nil {
+		m.notice = err.Error()
+		m.overlay = "notice"
+		return m, nil
+	}
+	m.config = nextConfig
+	m.classifier = classifier
+	m.plan, m.result, m.err = nil, nil, nil
+	m.cursor, m.loading, m.overlay, m.filter = 0, true, "", ""
+	return m, m.buildPlan()
 }
 
 func (m Model) selectMode() (tea.Model, tea.Cmd) {

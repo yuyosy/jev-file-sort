@@ -8,6 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"jev-file-sort/internal/config"
 )
 
 type styles struct {
@@ -73,6 +75,13 @@ func (m Model) renderHeader(s styles, width int) string {
 		return line + "\n"
 	}
 	meta := fmt.Sprintf("%s  →  %s  ·  %s", m.plan.Root, m.plan.OutputRoot, m.plan.Mode)
+	if m.plan.Mode == "jev" {
+		folderMode := "contents"
+		if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+			folderMode = "whole folders"
+		}
+		meta += "  ·  folders: " + folderMode
+	}
 	return line + "\n" + s.subtle.Render(truncate(meta, max(1, width-1)))
 }
 
@@ -200,7 +209,7 @@ func (m Model) renderFooter(s styles, width int) string {
 	if m.screen == "history" {
 		help = keyHelp(s, "↑↓", "move", "u", "undo", "r", "redo", "h", "back", "?", "help", "q", "quit")
 	} else {
-		help = keyHelp(s, "↑↓", "move", "→/c", "category", "space", "skip", "m", "mode", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
+		help = keyHelp(s, "↑↓", "move", "→/c", "category", "space", "skip", "m", "mode", "f", "folders", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
 	}
 	if m.filter != "" {
 		help = s.accent.Render("filter: "+m.filter) + "  " + help
@@ -212,7 +221,7 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 	var content string
 	switch m.overlay {
 	case "help":
-		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "→ / c", "choose category"), keyHelp(s, "← / Esc", "go back"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
+		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "→ / c", "choose category"), keyHelp(s, "← / Esc", "go back"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "f", "switch Jev folder evaluation"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
 	case "category":
 		lines := []string{s.title.Render("Choose category"), ""}
 		for index, category := range m.enabledCategories() {
@@ -239,8 +248,24 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 			lines = append(lines, line)
 		}
 		content = strings.Join(append(lines, "", s.subtle.Render("Enter rebuild plan · Esc cancel")), "\n")
+	case "folder-mode":
+		modes := []struct {
+			name, description string
+		}{
+			{"Contents", "Descend and classify contained entries"},
+			{"Folders", "Let Jev classify a folder as one unit"},
+		}
+		lines := []string{s.title.Render("Choose folder evaluation"), ""}
+		for index, mode := range modes {
+			line := fmt.Sprintf("  %-10s %s", mode.name, s.subtle.Render(mode.description))
+			if index == m.chooser {
+				line = s.selected.Width(52).Render(">" + line[1:])
+			}
+			lines = append(lines, line)
+		}
+		content = strings.Join(append(lines, "", s.subtle.Render("Enter rebuild plan · ←/Esc back")), "\n")
 	case "notice":
-		content = s.danger.Bold(true).Render("Mode not changed") + "\n\n" + m.notice + "\n\n" + s.subtle.Render("Press Enter or Esc to close")
+		content = s.danger.Bold(true).Render("Setting not changed") + "\n\n" + m.notice + "\n\n" + s.subtle.Render("Press Enter or Esc to close")
 	default:
 		action, id := m.overlay, "the current plan"
 		if action != "apply" && len(m.runs) > 0 {
