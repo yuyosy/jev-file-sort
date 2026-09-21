@@ -281,11 +281,6 @@ func (m *Model) openModeChooser() {
 }
 
 func (m *Model) openFolderModeChooser() {
-	if m.config.Mode != "jev" {
-		m.notice = "Folder evaluation is available in Jev mode."
-		m.overlay = "notice"
-		return
-	}
 	m.chooser = 0
 	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
 		m.chooser = 1

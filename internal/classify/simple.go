@@ -14,6 +14,9 @@ import (
 type Simple struct{ Config config.Config }
 
 func (s Simple) Classify(_ context.Context, entry plan.Entry) (plan.Classification, error) {
+	if entry.Kind == model.EntryFolder && !config.Enabled(s.Config.Jev.FolderEvaluation.Enabled) {
+		return plan.Classification{Decision: model.Decision{Kind: model.DecisionDescend}}, nil
+	}
 	var matches []config.Rule
 	for _, rule := range s.Config.Rules {
 		if !config.Enabled(rule.Enabled) || !supports(rule.Kinds, entry.Kind) {

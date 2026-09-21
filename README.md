@@ -23,7 +23,7 @@ jev-sort redo <run-id>
 jev-sort ui ~/Downloads
 ```
 
-The UI shows operation details beside the plan on wide terminals. Use `→` or `c` to choose a category (including for entries skipped by default), `←` to go back, `m` to switch between Simple and Jev modes, and `f` to switch Jev folder evaluation between descendant and whole-folder classification. `/` filters, `space` skips an operation, `h` opens history, and `?` shows the full key guide. Apply, undo, and redo use confirmation dialogs.
+The UI shows operation details beside the plan on wide terminals. Use `→` or `c` to choose a category (including for entries skipped by default), `←` to go back, `m` to switch between Simple and Jev modes, and `f` to switch between descendant and whole-folder classification. Whole-folder mode evaluates folder rules in Simple mode and adds Jev folder classification in Jev mode. `/` filters, `space` skips an operation, `h` opens history, and `?` shows the full key guide. Apply, undo, and redo use confirmation dialogs.
 
 `run` builds its plan in memory and does not create a plan file. It asks for confirmation in a terminal; use `--no-confirm` for explicit non-interactive execution and `--dry-run` to inspect the in-memory plan without moving anything. Use the separate `plan` and `apply` commands when the plan must be reviewed, retained, or applied later.
 

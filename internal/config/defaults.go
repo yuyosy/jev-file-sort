@@ -20,7 +20,7 @@ func Defaults() Config {
 			MaxRetries:     3,
 			Concurrency:    4,
 			FolderEvaluation: FolderEvaluation{
-				Enabled:    Bool(false),
+				Enabled:    Bool(true),
 				MaxEntries: 100,
 			},
 		},

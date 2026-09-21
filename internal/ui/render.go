@@ -75,13 +75,14 @@ func (m Model) renderHeader(s styles, width int) string {
 		return line + "\n"
 	}
 	meta := fmt.Sprintf("%s  →  %s  ·  %s", m.plan.Root, m.plan.OutputRoot, m.plan.Mode)
-	if m.plan.Mode == "jev" {
-		folderMode := "contents"
-		if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
-			folderMode = "whole folders"
+	folderMode := "contents"
+	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+		folderMode = "rules"
+		if m.plan.Mode == "jev" {
+			folderMode = "rules + Jev"
 		}
-		meta += "  ·  folders: " + folderMode
 	}
+	meta += "  ·  folders: " + folderMode
 	return line + "\n" + s.subtle.Render(truncate(meta, max(1, width-1)))
 }
 
@@ -221,7 +222,7 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 	var content string
 	switch m.overlay {
 	case "help":
-		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "→ / c", "choose category"), keyHelp(s, "← / Esc", "go back"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "f", "switch Jev folder evaluation"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
+		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "→ / c", "choose category"), keyHelp(s, "← / Esc", "go back"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "f", "switch folder evaluation"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
 	case "category":
 		lines := []string{s.title.Render("Choose category"), ""}
 		for index, category := range m.enabledCategories() {
@@ -249,11 +250,13 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 		}
 		content = strings.Join(append(lines, "", s.subtle.Render("Enter rebuild plan · Esc cancel")), "\n")
 	case "folder-mode":
-		modes := []struct {
-			name, description string
-		}{
+		folderDescription := "Evaluate matching folder rules"
+		if m.config.Mode == "jev" {
+			folderDescription = "Evaluate folder rules, then ask Jev"
+		}
+		modes := []struct{ name, description string }{
 			{"Contents", "Descend and classify contained entries"},
-			{"Folders", "Let Jev classify a folder as one unit"},
+			{"Folders", folderDescription},
 		}
 		lines := []string{s.title.Render("Choose folder evaluation"), ""}
 		for index, mode := range modes {
