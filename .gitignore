@@ -1,0 +1,12 @@
+*.local*
+*.env*
+
+out/
+build/
+*.test
+*.out
+
+*.exe
+*.dll
+*.so
+*.dylib
