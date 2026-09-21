@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -32,6 +33,7 @@ Usage:
   jev-sort config check [--config PATH] [--json]
   jev-sort ui [PATH] [--config PATH]
   jev-sort plan [PATH] --out PLAN.json [options]
+  jev-sort run [PATH] [--dry-run] [--no-confirm] [options]
   jev-sort apply PLAN.json [--json]
   jev-sort history [--json] [--history-dir PATH]
   jev-sort undo RUN_ID [--json] [--history-dir PATH]
@@ -52,6 +54,10 @@ Plan options:
   --collision POLICY  Collision policy: skip or number
   --allow-content     Authorize configured file-content transmission
   --json              Write the command result as JSON
+
+Run options:
+  --dry-run           Build and display an in-memory plan without moving files
+  --no-confirm        Apply the in-memory plan without an interactive prompt
 `
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -85,6 +91,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runUI(args[1:], stderr)
 	case "plan":
 		return runPlan(args[1:], stdout, stderr)
+	case "run":
+		return runCombined(args[1:], stdout, stderr)
 	case "apply":
 		return runApply(args[1:], stdout, stderr)
 	case "history":
@@ -102,6 +110,167 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+}
+
+func runCombined(args []string, stdout, stderr io.Writer) int {
+	planArgs, dryRun, noConfirm, jsonOutput, err := parseRunControls(args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if flagValue(planArgs, "--out") != "" {
+		fmt.Fprintln(stderr, "run does not write plan files; use plan followed by apply to retain a plan")
+		return 2
+	}
+	value, planCode := buildPlanInMemory(planArgs, stderr)
+	if planCode == 2 {
+		return 2
+	}
+	summary := summarizePlan(value, "")
+	if dryRun || planCode != 0 {
+		writeRunSummary(stdout, summary, value, jsonOutput, true)
+		if planCode != 0 {
+			return 1
+		}
+		return 0
+	}
+	planned := summary.Counts["planned"]
+	if planned == 0 {
+		writeRunSummary(stdout, summary, value, jsonOutput, false)
+		return 0
+	}
+	if !jsonOutput {
+		writePlanPreview(stdout, summary, value)
+	}
+	if !noConfirm {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintln(stderr, "run requires --no-confirm when stdin is not a terminal")
+			return 2
+		}
+		if jsonOutput {
+			writePlanPreview(stderr, summary, value)
+		}
+		confirmed, err := confirm(stderr)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if !confirmed {
+			fmt.Fprintln(stdout, "Cancelled.")
+			return 0
+		}
+	}
+	result, err := execute.Apply(context.Background(), value)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if jsonOutput {
+		payload := struct {
+			Plan   plan.Summary   `json:"plan"`
+			Result execute.Result `json:"result"`
+		}{Plan: summary, Result: result}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(payload); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	} else {
+		writeResult(stdout, result, false)
+	}
+	if result.Status != "completed" {
+		return 1
+	}
+	return 0
+}
+
+func parseRunControls(args []string) (remaining []string, dryRun, noConfirm, jsonOutput bool, err error) {
+	for _, argument := range args {
+		name, value, hasValue := argument, "true", false
+		if equals := strings.IndexByte(argument, '='); equals >= 0 {
+			name, value, hasValue = argument[:equals], argument[equals+1:], true
+		}
+		switch name {
+		case "--dry-run", "--no-confirm", "--json":
+			parsed := true
+			if hasValue {
+				parsed, err = strconv.ParseBool(value)
+				if err != nil {
+					return nil, false, false, false, fmt.Errorf("invalid value for %s", name)
+				}
+			}
+			switch name {
+			case "--dry-run":
+				dryRun = parsed
+			case "--no-confirm":
+				noConfirm = parsed
+			case "--json":
+				jsonOutput = parsed
+			}
+		default:
+			remaining = append(remaining, argument)
+		}
+	}
+	return remaining, dryRun, noConfirm, jsonOutput, nil
+}
+
+func flagValue(args []string, name string) string {
+	for index, argument := range args {
+		if argument == name && index+1 < len(args) {
+			return args[index+1]
+		}
+		if strings.HasPrefix(argument, name+"=") {
+			return strings.TrimPrefix(argument, name+"=")
+		}
+	}
+	return ""
+}
+
+func summarizePlan(value plan.Plan, path string) plan.Summary {
+	summary := plan.Summary{PlanID: value.ID, OutputPath: path, Counts: map[string]int{}}
+	for _, operation := range value.Operations {
+		summary.Counts[operation.Status]++
+	}
+	return summary
+}
+
+func writeRunSummary(writer io.Writer, summary plan.Summary, value plan.Plan, jsonOutput, dryRun bool) {
+	if jsonOutput {
+		payload := struct {
+			DryRun bool         `json:"dry_run"`
+			Plan   plan.Summary `json:"plan"`
+		}{DryRun: dryRun, Plan: summary}
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		_ = encoder.Encode(payload)
+		return
+	}
+	writePlanPreview(writer, summary, value)
+}
+
+func writePlanPreview(writer io.Writer, summary plan.Summary, value plan.Plan) {
+	fmt.Fprintf(writer, "Plan %s\n", summary.PlanID)
+	for _, operation := range value.Operations {
+		if operation.Status == "planned" {
+			fmt.Fprintf(writer, "move %s -> %s\n", operation.Source, operation.Destination)
+		}
+	}
+	for _, status := range []string{"planned", "unchanged", "skipped", "excluded", "error"} {
+		if count := summary.Counts[status]; count > 0 {
+			fmt.Fprintf(writer, "%s: %d\n", status, count)
+		}
+	}
+}
+
+func confirm(writer io.Writer) (bool, error) {
+	fmt.Fprint(writer, "Apply this plan? [y/N] ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return false, scanner.Err()
+	}
+	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	return answer == "y" || answer == "yes", nil
 }
 
 func runUI(args []string, stderr io.Writer) int {
@@ -366,6 +535,87 @@ type stringList []string
 
 func (s *stringList) String() string         { return strings.Join(*s, ",") }
 func (s *stringList) Set(value string) error { *s = append(*s, value); return nil }
+
+func buildPlanInMemory(args []string, stderr io.Writer) (plan.Plan, int) {
+	flagArgs, target, argumentErr := normalizePlanArgs(args)
+	if argumentErr != nil {
+		fmt.Fprintln(stderr, argumentErr)
+		return plan.Plan{}, 2
+	}
+	set := flag.NewFlagSet("run", flag.ContinueOnError)
+	set.SetOutput(stderr)
+	configPath := set.String("config", "", "explicit YAML configuration file")
+	mode := set.String("mode", "", "classification mode")
+	output := set.String("output", "", "output root")
+	recursive := set.Bool("recursive", false, "explore subdirectories")
+	maxDepth := set.Int("max-depth", -1, "maximum exploration depth")
+	collision := set.String("collision", "", "collision policy")
+	allowContent := set.Bool("allow-content", false, "authorize configured file-content transmission")
+	var includes, excludes stringList
+	set.Var(&includes, "include", "include pattern")
+	set.Var(&excludes, "exclude", "exclude pattern")
+	if err := set.Parse(flagArgs); err != nil {
+		return plan.Plan{}, 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return plan.Plan{}, 2
+	}
+	if *mode != "" {
+		cfg.Mode = *mode
+	}
+	if *output != "" {
+		cfg.Output.Root = *output
+	}
+	if *recursive {
+		cfg.Scan.Recursive = config.Bool(true)
+	}
+	if *maxDepth >= 0 {
+		cfg.Scan.MaxDepth = config.Int(*maxDepth)
+		cfg.Scan.Recursive = config.Bool(true)
+	}
+	if *collision != "" {
+		cfg.Output.Collision = *collision
+	}
+	if includes != nil {
+		cfg.Selection.Include = includes
+	}
+	if excludes != nil {
+		cfg.Selection.Exclude = excludes
+	}
+	cfg.Content.Authorized = *allowContent
+	diagnostics := config.Validate(cfg)
+	if config.HasErrors(diagnostics) {
+		writeDiagnostics(stderr, diagnostics)
+		return plan.Plan{}, 2
+	}
+	classifier, err := classifierForConfig(cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return plan.Plan{}, 2
+	}
+	value, err := (plan.Builder{Config: cfg, Classifier: classifier}).Build(context.Background(), target)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return plan.Plan{}, 1
+	}
+	value.Diagnostics = append(value.Diagnostics, diagnostics...)
+	if countPlanStatus(value, "error") > 0 {
+		return value, 1
+	}
+	return value, 0
+}
+
+func countPlanStatus(value plan.Plan, status string) int {
+	count := 0
+	for _, operation := range value.Operations {
+		if operation.Status == status {
+			count++
+		}
+	}
+	return count
+}
 
 func runPlan(args []string, stdout, stderr io.Writer) int {
 	flagArgs, target, argumentErr := normalizePlanArgs(args)

@@ -12,6 +12,9 @@ go build -o jev-sort ./cmd/jev-sort
 
 ```sh
 jev-sort config check
+jev-sort run ~/Downloads --dry-run
+jev-sort run ~/Downloads
+jev-sort run ~/Downloads --no-confirm
 jev-sort plan ~/Downloads --recursive --out plan.json
 jev-sort apply plan.json
 jev-sort history
@@ -19,6 +22,8 @@ jev-sort undo <run-id>
 jev-sort redo <run-id>
 jev-sort ui ~/Downloads
 ```
+
+`run` builds its plan in memory and does not create a plan file. It asks for confirmation in a terminal; use `--no-confirm` for explicit non-interactive execution and `--dry-run` to inspect the in-memory plan without moving anything. Use the separate `plan` and `apply` commands when the plan must be reviewed, retained, or applied later.
 
 Running `jev-sort` without a command opens the UI only when stdin and stdout are terminals. Planning never moves source files; `apply` revalidates source fingerprints and destinations before moving anything.
 

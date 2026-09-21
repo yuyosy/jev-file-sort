@@ -39,6 +39,6 @@ type Operation struct {
 
 type Summary struct {
 	PlanID     string         `json:"plan_id"`
-	OutputPath string         `json:"output_path"`
+	OutputPath string         `json:"output_path,omitempty"`
 	Counts     map[string]int `json:"counts"`
 }
