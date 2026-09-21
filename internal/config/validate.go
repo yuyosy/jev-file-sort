@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	matchpattern "jev-file-sort/internal/pattern"
 )
 
 type Diagnostic struct {
@@ -125,6 +127,11 @@ func Validate(cfg Config) []Diagnostic {
 		}
 		if len(rule.Match.Patterns) == 0 && len(rule.Match.Extensions) == 0 && len(rule.Match.ChildExtensions) == 0 {
 			errorf(subject, "at least one matcher is required")
+		}
+		for _, candidate := range rule.Match.Patterns {
+			if err := matchpattern.Validate(candidate); err != nil {
+				errorf(subject, "invalid pattern %q: %v", candidate, err)
+			}
 		}
 		if rule.Match.Depth != nil {
 			if rule.Match.Depth.Min != nil && *rule.Match.Depth.Min < 0 {

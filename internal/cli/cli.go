@@ -1,24 +1,41 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
+	"jev-file-sort/internal/classify"
 	"jev-file-sort/internal/config"
+	"jev-file-sort/internal/plan"
 )
 
 const usage = `jev-sort sorts files with deterministic rules or Jev classification.
 
 Usage:
   jev-sort config check [--config PATH] [--json]
+  jev-sort plan [PATH] --out PLAN.json [options]
   jev-sort help
   jev-sort version
+
+Plan options:
+  --config PATH       Load an explicit YAML configuration
+  --mode MODE         Classification mode: simple or jev
+  --output PATH       Override the output root
+  --recursive         Explore subdirectories
+  --max-depth N       Explore through depth N
+  --include PATTERN   Include a pattern (repeatable)
+  --exclude PATTERN   Exclude a pattern (repeatable)
+  --collision POLICY  Collision policy: skip or number
+  --json              Write the command result as JSON
 `
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -40,10 +57,156 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return runConfigCheck(args[2:], stdout, stderr)
+	case "plan":
+		return runPlan(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+}
+
+type stringList []string
+
+func (s *stringList) String() string         { return strings.Join(*s, ",") }
+func (s *stringList) Set(value string) error { *s = append(*s, value); return nil }
+
+func runPlan(args []string, stdout, stderr io.Writer) int {
+	flagArgs, target, argumentErr := normalizePlanArgs(args)
+	if argumentErr != nil {
+		fmt.Fprintln(stderr, argumentErr)
+		return 2
+	}
+	set := flag.NewFlagSet("plan", flag.ContinueOnError)
+	set.SetOutput(stderr)
+	configPath := set.String("config", "", "explicit YAML configuration file")
+	mode := set.String("mode", "", "classification mode")
+	output := set.String("output", "", "output root")
+	recursive := set.Bool("recursive", false, "explore subdirectories")
+	maxDepth := set.Int("max-depth", -1, "maximum exploration depth")
+	collision := set.String("collision", "", "collision policy")
+	out := set.String("out", "", "plan output path")
+	jsonOutput := set.Bool("json", false, "write JSON result")
+	var includes, excludes stringList
+	set.Var(&includes, "include", "include pattern")
+	set.Var(&excludes, "exclude", "exclude pattern")
+	if err := set.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if *out == "" {
+		fmt.Fprintln(stderr, "plan requires --out")
+		return 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if *mode != "" {
+		cfg.Mode = *mode
+	}
+	if *output != "" {
+		cfg.Output.Root = *output
+	}
+	if *recursive {
+		cfg.Scan.Recursive = config.Bool(true)
+	}
+	if *maxDepth >= 0 {
+		cfg.Scan.MaxDepth = config.Int(*maxDepth)
+		cfg.Scan.Recursive = config.Bool(true)
+	}
+	if *collision != "" {
+		cfg.Output.Collision = *collision
+	}
+	if includes != nil {
+		cfg.Selection.Include = includes
+	}
+	if excludes != nil {
+		cfg.Selection.Exclude = excludes
+	}
+	diagnostics := config.Validate(cfg)
+	if config.HasErrors(diagnostics) {
+		writeDiagnostics(stderr, diagnostics)
+		return 2
+	}
+	if cfg.Mode != "simple" {
+		fmt.Fprintln(stderr, "jev mode is not available in this build yet")
+		return 2
+	}
+	builder := plan.Builder{Config: cfg, Classifier: classify.Simple{Config: cfg}}
+	value, err := builder.Build(context.Background(), target)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	value.Diagnostics = append(value.Diagnostics, diagnostics...)
+	planPath, err := filepath.Abs(*out)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := plan.Write(planPath, value); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	summary := plan.Summary{PlanID: value.ID, OutputPath: planPath, Counts: map[string]int{}}
+	for _, operation := range value.Operations {
+		summary.Counts[operation.Status]++
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(summary); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "Plan %s written to %s\n", summary.PlanID, summary.OutputPath)
+		for _, status := range []string{"planned", "unchanged", "skipped", "excluded", "error"} {
+			if count := summary.Counts[status]; count > 0 {
+				fmt.Fprintf(stdout, "%s: %d\n", status, count)
+			}
+		}
+	}
+	if summary.Counts["error"] > 0 {
+		return 1
+	}
+	return 0
+}
+
+func normalizePlanArgs(args []string) ([]string, string, error) {
+	target := "."
+	foundTarget := false
+	valueFlags := map[string]bool{"--config": true, "--mode": true, "--output": true, "--max-depth": true, "--collision": true, "--out": true, "--include": true, "--exclude": true}
+	result := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if strings.HasPrefix(argument, "-") {
+			result = append(result, argument)
+			name := argument
+			if equals := strings.IndexByte(argument, '='); equals >= 0 {
+				name = argument[:equals]
+			}
+			if valueFlags[name] && !strings.Contains(argument, "=") {
+				if index+1 >= len(args) {
+					return nil, "", fmt.Errorf("flag %s requires a value", argument)
+				}
+				index++
+				result = append(result, args[index])
+			}
+			continue
+		}
+		if foundTarget {
+			return nil, "", fmt.Errorf("plan accepts at most one target path")
+		}
+		target, foundTarget = argument, true
+	}
+	return result, target, nil
+}
+
+func writeDiagnostics(writer io.Writer, diagnostics []config.Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		fmt.Fprintf(writer, "%s: %s: %s\n", diagnostic.Level, diagnostic.Subject, diagnostic.Message)
 	}
 }
 
