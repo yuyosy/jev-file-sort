@@ -188,7 +188,7 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 }
 
 func (b Builder) operation(entry Entry, decision model.Decision, summarySent bool, outputRoot string, reserved map[string]struct{}) (Operation, error) {
-	fingerprint, err := fingerprint(entry.Path, entry.Kind)
+	fingerprint, err := FingerprintPath(entry.Path, entry.Kind)
 	if err != nil {
 		return errorOperation(entry.Path, entry.Relative, err), nil
 	}
@@ -258,7 +258,7 @@ func readChildren(directory string) ([]Child, error) {
 	return children, nil
 }
 
-func fingerprint(path string, kind model.EntryKind) (model.Fingerprint, error) {
+func FingerprintPath(path string, kind model.EntryKind) (model.Fingerprint, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return model.Fingerprint{}, err

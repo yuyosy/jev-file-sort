@@ -15,6 +15,7 @@ import (
 
 	"jev-file-sort/internal/classify"
 	"jev-file-sort/internal/config"
+	"jev-file-sort/internal/execute"
 	"jev-file-sort/internal/plan"
 )
 
@@ -23,6 +24,11 @@ const usage = `jev-sort sorts files with deterministic rules or Jev classificati
 Usage:
   jev-sort config check [--config PATH] [--json]
   jev-sort plan [PATH] --out PLAN.json [options]
+  jev-sort apply PLAN.json [--json]
+  jev-sort history [--json] [--history-dir PATH]
+  jev-sort undo RUN_ID [--json] [--history-dir PATH]
+  jev-sort redo RUN_ID [--json] [--history-dir PATH]
+  jev-sort recover RUN_ID [--json] [--history-dir PATH]
   jev-sort help
   jev-sort version
 
@@ -59,11 +65,170 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runConfigCheck(args[2:], stdout, stderr)
 	case "plan":
 		return runPlan(args[1:], stdout, stderr)
+	case "apply":
+		return runApply(args[1:], stdout, stderr)
+	case "history":
+		return runHistory(args[1:], stdout, stderr)
+	case "undo":
+		return runMutation("undo", args[1:], stdout, stderr)
+	case "redo":
+		return runMutation("redo", args[1:], stdout, stderr)
+	case "recover":
+		return runMutation("recover", args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+}
+
+func runApply(args []string, stdout, stderr io.Writer) int {
+	flagArgs, positional, err := normalizeOnePositional(args, map[string]bool{})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	set := flag.NewFlagSet("apply", flag.ContinueOnError)
+	set.SetOutput(stderr)
+	jsonOutput := set.Bool("json", false, "write JSON result")
+	if err := set.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if positional == "" {
+		fmt.Fprintln(stderr, "apply requires a plan path")
+		return 2
+	}
+	value, err := plan.Read(positional)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	result, err := execute.Apply(context.Background(), value)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	writeResult(stdout, result, *jsonOutput)
+	if result.Status != "completed" {
+		return 1
+	}
+	return 0
+}
+
+func runHistory(args []string, stdout, stderr io.Writer) int {
+	set := flag.NewFlagSet("history", flag.ContinueOnError)
+	set.SetOutput(stderr)
+	jsonOutput := set.Bool("json", false, "write JSON result")
+	directory := set.String("history-dir", "", "history directory")
+	if err := set.Parse(args); err != nil {
+		return 2
+	}
+	if set.NArg() != 0 {
+		fmt.Fprintln(stderr, "history does not accept positional arguments")
+		return 2
+	}
+	store, err := execute.NewStore(*directory)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	runs, err := store.List()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(runs); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
+	for _, run := range runs {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", run.ID, run.Status, run.CreatedAt.Format("2006-01-02 15:04:05Z07:00"), run.Plan.Root)
+	}
+	return 0
+}
+
+func runMutation(command string, args []string, stdout, stderr io.Writer) int {
+	flagArgs, id, err := normalizeOnePositional(args, map[string]bool{"--history-dir": true})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	set := flag.NewFlagSet(command, flag.ContinueOnError)
+	set.SetOutput(stderr)
+	jsonOutput := set.Bool("json", false, "write JSON result")
+	directory := set.String("history-dir", "", "history directory")
+	if err := set.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if id == "" {
+		fmt.Fprintf(stderr, "%s requires a run ID\n", command)
+		return 2
+	}
+	var result execute.Result
+	if command == "undo" {
+		result, err = execute.Undo(context.Background(), id, *directory)
+	} else if command == "redo" {
+		result, err = execute.Redo(context.Background(), id, *directory)
+	} else {
+		result, err = execute.Recover(id, *directory)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	writeResult(stdout, result, *jsonOutput)
+	if result.Status != "completed" && result.Status != "undone" {
+		return 1
+	}
+	return 0
+}
+
+func writeResult(writer io.Writer, result execute.Result, jsonOutput bool) {
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		_ = encoder.Encode(result)
+		return
+	}
+	fmt.Fprintf(writer, "Run %s: %s\n", result.RunID, result.Status)
+	for _, state := range []string{"completed", "undone", "failed"} {
+		if count := result.Counts[state]; count > 0 {
+			fmt.Fprintf(writer, "%s: %d\n", state, count)
+		}
+	}
+}
+
+func normalizeOnePositional(args []string, valueFlags map[string]bool) ([]string, string, error) {
+	var positional string
+	result := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if strings.HasPrefix(argument, "-") {
+			result = append(result, argument)
+			name := argument
+			if equals := strings.IndexByte(argument, '='); equals >= 0 {
+				name = argument[:equals]
+			}
+			if valueFlags[name] && !strings.Contains(argument, "=") {
+				if index+1 >= len(args) {
+					return nil, "", fmt.Errorf("flag %s requires a value", argument)
+				}
+				index++
+				result = append(result, args[index])
+			}
+			continue
+		}
+		if positional != "" {
+			return nil, "", fmt.Errorf("accepts only one positional argument")
+		}
+		positional = argument
+	}
+	return result, positional, nil
 }
 
 type stringList []string
