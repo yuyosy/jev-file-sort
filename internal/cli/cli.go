@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/goccy/go-yaml"
 	"golang.org/x/term"
 
@@ -22,12 +23,14 @@ import (
 	"jev-file-sort/internal/execute"
 	jevclient "jev-file-sort/internal/jev"
 	"jev-file-sort/internal/plan"
+	"jev-file-sort/internal/ui"
 )
 
 const usage = `jev-sort sorts files with deterministic rules or Jev classification.
 
 Usage:
   jev-sort config check [--config PATH] [--json]
+  jev-sort ui [PATH] [--config PATH]
   jev-sort plan [PATH] --out PLAN.json [options]
   jev-sort apply PLAN.json [--json]
   jev-sort history [--json] [--history-dir PATH]
@@ -52,7 +55,15 @@ Plan options:
 `
 
 func Run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	if len(args) == 0 {
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			return runUI(nil, stderr)
+		}
+		fmt.Fprintln(stderr, "a terminal is required for implicit UI mode")
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
@@ -70,6 +81,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return runConfigCheck(args[2:], stdout, stderr)
+	case "ui":
+		return runUI(args[1:], stderr)
 	case "plan":
 		return runPlan(args[1:], stdout, stderr)
 	case "apply":
@@ -89,6 +102,55 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+}
+
+func runUI(args []string, stderr io.Writer) int {
+	flagArgs, target, err := normalizeOnePositional(args, map[string]bool{"--config": true})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if target == "" {
+		target = "."
+	}
+	set := flag.NewFlagSet("ui", flag.ContinueOnError)
+	set.SetOutput(stderr)
+	configPath := set.String("config", "", "explicit YAML configuration file")
+	if err := set.Parse(flagArgs); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	diagnostics := config.Validate(cfg)
+	if config.HasErrors(diagnostics) {
+		writeDiagnostics(stderr, diagnostics)
+		return 2
+	}
+	classifier, err := classifierForConfig(cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	program := tea.NewProgram(ui.New(target, cfg, classifier))
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func classifierForConfig(cfg config.Config) (plan.Classifier, error) {
+	if cfg.Mode == "simple" {
+		return classify.Simple{Config: cfg}, nil
+	}
+	apiKey, _, err := auth.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	return classify.Jev{Config: cfg, Client: jevclient.Client{Config: cfg.Jev, APIKey: apiKey}}, nil
 }
 
 func runAuth(args []string, stdout, stderr io.Writer) int {
@@ -365,14 +427,10 @@ func runPlan(args []string, stdout, stderr io.Writer) int {
 		writeDiagnostics(stderr, diagnostics)
 		return 2
 	}
-	var classifier plan.Classifier = classify.Simple{Config: cfg}
-	if cfg.Mode == "jev" {
-		apiKey, _, err := auth.Resolve()
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		classifier = classify.Jev{Config: cfg, Client: jevclient.Client{Config: cfg.Jev, APIKey: apiKey}}
+	classifier, err := classifierForConfig(cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 	builder := plan.Builder{Config: cfg, Classifier: classifier}
 	value, err := builder.Build(context.Background(), target)
