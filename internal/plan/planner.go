@@ -20,7 +20,13 @@ import (
 )
 
 type Classifier interface {
-	Classify(ctx context.Context, entry Entry) (model.Decision, bool, error)
+	Classify(ctx context.Context, entry Entry) (Classification, error)
+}
+
+type Classification struct {
+	Decision          model.Decision
+	ContentSent       bool
+	FolderSummarySent bool
 }
 
 type Entry struct {
@@ -141,14 +147,15 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 	}
 
 	if included {
-		decision, summarySent, classifyErr := b.Classifier.Classify(ctx, entry)
+		classification, classifyErr := b.Classifier.Classify(ctx, entry)
+		decision := classification.Decision
 		if classifyErr != nil {
 			value.Operations = append(value.Operations, errorOperation(path, relative, classifyErr))
 			if kind != model.EntryFolder {
 				return nil
 			}
 		} else if decision.Kind == model.DecisionCategory || (kind != model.EntryFolder && decision.Kind == model.DecisionUncategorized) {
-			operation, planErr := b.operation(entry, decision, summarySent, outputRoot, reserved)
+			operation, planErr := b.operation(entry, classification, outputRoot, reserved)
 			if planErr != nil {
 				return planErr
 			}
@@ -157,11 +164,13 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 				return nil
 			}
 		} else if kind != model.EntryFolder {
-			operation, planErr := b.operation(entry, decision, summarySent, outputRoot, reserved)
+			operation, planErr := b.operation(entry, classification, outputRoot, reserved)
 			if planErr != nil {
 				return planErr
 			}
 			value.Operations = append(value.Operations, operation)
+		} else if classification.FolderSummarySent {
+			value.Operations = append(value.Operations, Operation{ID: randomID(), Source: entry.Path, RelativeSource: entry.Relative, Kind: entry.Kind, Decision: decision, Status: "unchanged", Reason: "folder contents will be classified individually", FolderSummarySent: true})
 		}
 	}
 	if kind != model.EntryFolder {
@@ -187,12 +196,13 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 	return nil
 }
 
-func (b Builder) operation(entry Entry, decision model.Decision, summarySent bool, outputRoot string, reserved map[string]struct{}) (Operation, error) {
+func (b Builder) operation(entry Entry, classification Classification, outputRoot string, reserved map[string]struct{}) (Operation, error) {
+	decision := classification.Decision
 	fingerprint, err := FingerprintPath(entry.Path, entry.Kind)
 	if err != nil {
 		return errorOperation(entry.Path, entry.Relative, err), nil
 	}
-	op := Operation{ID: randomID(), Source: entry.Path, RelativeSource: entry.Relative, Kind: entry.Kind, Decision: decision, Status: "unchanged", Fingerprint: fingerprint, FolderSummarySent: summarySent}
+	op := Operation{ID: randomID(), Source: entry.Path, RelativeSource: entry.Relative, Kind: entry.Kind, Decision: decision, Status: "unchanged", Fingerprint: fingerprint, ContentSent: classification.ContentSent, FolderSummarySent: classification.FolderSummarySent}
 	directory := ""
 	if decision.Kind == model.DecisionCategory {
 		category, ok := b.Config.Category(decision.CategoryID)

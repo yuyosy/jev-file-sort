@@ -44,6 +44,7 @@ type Content struct {
 	Enabled       *bool    `yaml:"enabled,omitempty" json:"enabled"`
 	AllowPatterns []string `yaml:"allow_patterns,omitempty" json:"allow_patterns"`
 	MaxBytes      int64    `yaml:"max_bytes,omitempty" json:"max_bytes"`
+	Authorized    bool     `yaml:"-" json:"authorized"`
 }
 
 type Jev struct {

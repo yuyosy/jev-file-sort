@@ -13,7 +13,7 @@ import (
 
 type Simple struct{ Config config.Config }
 
-func (s Simple) Classify(_ context.Context, entry plan.Entry) (model.Decision, bool, error) {
+func (s Simple) Classify(_ context.Context, entry plan.Entry) (plan.Classification, error) {
 	var matches []config.Rule
 	for _, rule := range s.Config.Rules {
 		if !config.Enabled(rule.Enabled) || !supports(rule.Kinds, entry.Kind) {
@@ -25,7 +25,7 @@ func (s Simple) Classify(_ context.Context, entry plan.Entry) (model.Decision, b
 		}
 		matched, err := matchRule(rule, entry)
 		if err != nil {
-			return model.Decision{}, false, err
+			return plan.Classification{}, err
 		}
 		if matched {
 			matches = append(matches, rule)
@@ -33,15 +33,15 @@ func (s Simple) Classify(_ context.Context, entry plan.Entry) (model.Decision, b
 	}
 	if len(matches) == 0 {
 		if entry.Kind == model.EntryFolder {
-			return model.Decision{Kind: model.DecisionDescend}, false, nil
+			return plan.Classification{Decision: model.Decision{Kind: model.DecisionDescend}}, nil
 		}
-		return model.Decision{Kind: model.DecisionUncategorized}, false, nil
+		return plan.Classification{Decision: model.Decision{Kind: model.DecisionUncategorized}}, nil
 	}
 	decision := model.Decision{Kind: model.DecisionCategory, CategoryID: matches[0].Category, RuleID: matches[0].ID}
 	for _, conflict := range matches[1:] {
 		decision.Warnings = append(decision.Warnings, "also matched later rule "+conflict.ID)
 	}
-	return decision, false, nil
+	return plan.Classification{Decision: decision}, nil
 }
 
 func matchRule(rule config.Rule, entry plan.Entry) (bool, error) {

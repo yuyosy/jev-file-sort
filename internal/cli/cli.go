@@ -1,21 +1,26 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"golang.org/x/term"
 
+	"jev-file-sort/internal/auth"
 	"jev-file-sort/internal/classify"
 	"jev-file-sort/internal/config"
 	"jev-file-sort/internal/execute"
+	jevclient "jev-file-sort/internal/jev"
 	"jev-file-sort/internal/plan"
 )
 
@@ -29,6 +34,7 @@ Usage:
   jev-sort undo RUN_ID [--json] [--history-dir PATH]
   jev-sort redo RUN_ID [--json] [--history-dir PATH]
   jev-sort recover RUN_ID [--json] [--history-dir PATH]
+  jev-sort auth login|status|logout
   jev-sort help
   jev-sort version
 
@@ -41,6 +47,7 @@ Plan options:
   --include PATTERN   Include a pattern (repeatable)
   --exclude PATTERN   Exclude a pattern (repeatable)
   --collision POLICY  Collision policy: skip or number
+  --allow-content     Authorize configured file-content transmission
   --json              Write the command result as JSON
 `
 
@@ -75,9 +82,71 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runMutation("redo", args[1:], stdout, stderr)
 	case "recover":
 		return runMutation("recover", args[1:], stdout, stderr)
+	case "auth":
+		return runAuth(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		fmt.Fprint(stderr, usage)
+		return 2
+	}
+}
+
+func runAuth(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: jev-sort auth login|status|logout")
+		return 2
+	}
+	switch args[0] {
+	case "login":
+		var value string
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprint(stderr, "TypeSafe API key: ")
+			data, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(stderr)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			value = string(data)
+		} else {
+			scanner := bufio.NewScanner(os.Stdin)
+			if !scanner.Scan() {
+				if scanner.Err() != nil {
+					fmt.Fprintln(stderr, scanner.Err())
+				} else {
+					fmt.Fprintln(stderr, "no API key received")
+				}
+				return 1
+			}
+			value = scanner.Text()
+		}
+		if err := auth.Set(value); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "API key saved in the OS credential store")
+		return 0
+	case "status":
+		source, configured, err := auth.Status()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if configured {
+			fmt.Fprintf(stdout, "configured (%s)\n", source)
+		} else {
+			fmt.Fprintln(stdout, "not configured")
+		}
+		return 0
+	case "logout":
+		if err := auth.Delete(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "stored API key removed")
+		return 0
+	default:
+		fmt.Fprintln(stderr, "usage: jev-sort auth login|status|logout")
 		return 2
 	}
 }
@@ -252,6 +321,7 @@ func runPlan(args []string, stdout, stderr io.Writer) int {
 	collision := set.String("collision", "", "collision policy")
 	out := set.String("out", "", "plan output path")
 	jsonOutput := set.Bool("json", false, "write JSON result")
+	allowContent := set.Bool("allow-content", false, "authorize configured file-content transmission")
 	var includes, excludes stringList
 	set.Var(&includes, "include", "include pattern")
 	set.Var(&excludes, "exclude", "exclude pattern")
@@ -289,16 +359,22 @@ func runPlan(args []string, stdout, stderr io.Writer) int {
 	if excludes != nil {
 		cfg.Selection.Exclude = excludes
 	}
+	cfg.Content.Authorized = *allowContent
 	diagnostics := config.Validate(cfg)
 	if config.HasErrors(diagnostics) {
 		writeDiagnostics(stderr, diagnostics)
 		return 2
 	}
-	if cfg.Mode != "simple" {
-		fmt.Fprintln(stderr, "jev mode is not available in this build yet")
-		return 2
+	var classifier plan.Classifier = classify.Simple{Config: cfg}
+	if cfg.Mode == "jev" {
+		apiKey, _, err := auth.Resolve()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		classifier = classify.Jev{Config: cfg, Client: jevclient.Client{Config: cfg.Jev, APIKey: apiKey}}
 	}
-	builder := plan.Builder{Config: cfg, Classifier: classify.Simple{Config: cfg}}
+	builder := plan.Builder{Config: cfg, Classifier: classifier}
 	value, err := builder.Build(context.Background(), target)
 	if err != nil {
 		fmt.Fprintln(stderr, err)

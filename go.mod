@@ -2,4 +2,11 @@ module jev-file-sort
 
 go 1.27.1
 
-require github.com/goccy/go-yaml v1.19.2 // indirect
+require (
+	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/zalando/go-keyring v0.2.8 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+)
