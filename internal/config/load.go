@@ -125,8 +125,8 @@ func mergeScan(dst *Scan, src Scan) {
 			dst.Recursive = Bool(true)
 		}
 	}
-	if src.IncludeHidden != nil {
-		dst.IncludeHidden = src.IncludeHidden
+	if src.IncludeDotfiles != nil {
+		dst.IncludeDotfiles = src.IncludeDotfiles
 	}
 	if src.FollowSymlinks != nil {
 		dst.FollowSymlinks = src.FollowSymlinks

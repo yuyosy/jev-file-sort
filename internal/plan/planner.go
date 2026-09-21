@@ -180,8 +180,8 @@ func (b Builder) prepareVisit(ctx context.Context, input visitInput, depth int, 
 		entry.Children, _ = readChildren(input.path)
 	}
 
-	if hidden(entry.Name) && !config.Enabled(b.Config.Scan.IncludeHidden) {
-		op := excludedOperation(entry, "hidden entry")
+	if dotfile(entry.Name) && !config.Enabled(b.Config.Scan.IncludeDotfiles) {
+		op := excludedOperation(entry, "dotfile entry")
 		return visitItem{entry: entry, terminal: &op}, nil
 	}
 	excluded, err := matchesAny(b.Config.Selection.Exclude, entry.Relative, entry.Name)
@@ -423,7 +423,7 @@ func randomID() string {
 	}
 	return hex.EncodeToString(data)
 }
-func hidden(name string) bool { return strings.HasPrefix(name, ".") }
+func dotfile(name string) bool { return strings.HasPrefix(name, ".") }
 func canonical(path string) string {
 	absolute, _ := filepath.Abs(path)
 	cleaned := filepath.Clean(absolute)

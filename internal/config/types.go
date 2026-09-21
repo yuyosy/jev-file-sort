@@ -24,10 +24,10 @@ type Selection struct {
 }
 
 type Scan struct {
-	Recursive      *bool `yaml:"recursive,omitempty" json:"recursive"`
-	MaxDepth       *int  `yaml:"max_depth,omitempty" json:"max_depth,omitempty"`
-	IncludeHidden  *bool `yaml:"include_hidden,omitempty" json:"include_hidden"`
-	FollowSymlinks *bool `yaml:"follow_symlinks,omitempty" json:"follow_symlinks"`
+	Recursive       *bool `yaml:"recursive,omitempty" json:"recursive"`
+	MaxDepth        *int  `yaml:"max_depth,omitempty" json:"max_depth,omitempty"`
+	IncludeDotfiles *bool `yaml:"include_dotfiles,omitempty" json:"include_dotfiles"`
+	FollowSymlinks  *bool `yaml:"follow_symlinks,omitempty" json:"follow_symlinks"`
 }
 
 type Folders struct {
