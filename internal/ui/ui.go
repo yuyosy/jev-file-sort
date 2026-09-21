@@ -15,17 +15,21 @@ type Model struct {
 	root                    string
 	config                  config.Config
 	classifier              plan.Classifier
+	classifierFactory       ClassifierFactory
 	plan                    *plan.Plan
 	result                  *execute.Result
 	runs                    []execute.Run
 	cursor, width, height   int
 	loading, applying, dark bool
 	screen, overlay, filter string
+	notice                  string
 	filtering               bool
 	chooser                 int
 	err                     error
 	cancel                  context.CancelFunc
 }
+
+type ClassifierFactory func(config.Config) (plan.Classifier, error)
 
 type planMsg struct {
 	value plan.Plan
@@ -40,8 +44,8 @@ type historyMsg struct {
 	err  error
 }
 
-func New(root string, cfg config.Config, classifier plan.Classifier) Model {
-	return Model{root: root, config: cfg, classifier: classifier, loading: true, screen: "plan", dark: true}
+func New(root string, cfg config.Config, classifier plan.Classifier, classifierFactory ClassifierFactory) Model {
+	return Model{root: root, config: cfg, classifier: classifier, classifierFactory: classifierFactory, loading: true, screen: "plan", dark: true}
 }
 
 func (m Model) Init() tea.Cmd { return tea.Batch(m.buildPlan(), tea.RequestBackgroundColor) }
@@ -138,6 +142,8 @@ func (m Model) updatePlan(key string) (tea.Model, tea.Cmd) {
 		}
 	case "c":
 		m.openCategoryChooser()
+	case "m":
+		m.openModeChooser()
 	case "a":
 		m.overlay = "apply"
 	case "h":
@@ -178,6 +184,12 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.overlay == "notice" {
+		if key == "enter" {
+			m.overlay, m.notice = "", ""
+		}
+		return m, nil
+	}
 	if m.overlay == "category" {
 		categories := m.enabledCategories()
 		switch key {
@@ -194,6 +206,21 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 				_ = plan.SetCategory(m.plan, index, categories[m.chooser].ID)
 			}
 			m.overlay = ""
+		}
+		return m, nil
+	}
+	if m.overlay == "mode" {
+		switch key {
+		case "up", "k":
+			if m.chooser > 0 {
+				m.chooser--
+			}
+		case "down", "j":
+			if m.chooser < 1 {
+				m.chooser++
+			}
+		case "enter":
+			return m.selectMode()
 		}
 		return m, nil
 	}
@@ -221,6 +248,38 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 		result, err := execute.Redo(ctx, id, m.config.History.Directory)
 		return applyMsg{result: result, err: err}
 	}
+}
+
+func (m *Model) openModeChooser() {
+	m.chooser = 0
+	if m.config.Mode == "jev" {
+		m.chooser = 1
+	}
+	m.overlay = "mode"
+}
+
+func (m Model) selectMode() (tea.Model, tea.Cmd) {
+	mode := "simple"
+	if m.chooser == 1 {
+		mode = "jev"
+	}
+	if mode == m.config.Mode {
+		m.overlay = ""
+		return m, nil
+	}
+	nextConfig := m.config
+	nextConfig.Mode = mode
+	classifier, err := m.classifierFactory(nextConfig)
+	if err != nil {
+		m.notice = err.Error()
+		m.overlay = "notice"
+		return m, nil
+	}
+	m.config = nextConfig
+	m.classifier = classifier
+	m.plan, m.result, m.err = nil, nil, nil
+	m.cursor, m.loading, m.overlay, m.filter = 0, true, "", ""
+	return m, m.buildPlan()
 }
 
 func (m Model) loadHistory() tea.Cmd {

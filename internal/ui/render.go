@@ -198,7 +198,7 @@ func (m Model) renderFooter(s styles, width int) string {
 	if m.screen == "history" {
 		help = keyHelp(s, "↑↓", "move", "u", "undo", "r", "redo", "h", "back", "?", "help", "q", "quit")
 	} else {
-		help = keyHelp(s, "↑↓", "move", "space", "skip", "c", "category", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
+		help = keyHelp(s, "↑↓", "move", "space", "skip", "c", "category", "m", "mode", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
 	}
 	if m.filter != "" {
 		help = s.accent.Render("filter: "+m.filter) + "  " + help
@@ -210,7 +210,7 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 	var content string
 	switch m.overlay {
 	case "help":
-		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "c", "choose category"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "Esc", "close or clear"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
+		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "c", "choose category"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "Esc", "close or clear"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
 	case "category":
 		lines := []string{s.title.Render("Choose category"), ""}
 		for index, category := range m.enabledCategories() {
@@ -221,6 +221,24 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 			lines = append(lines, line)
 		}
 		content = strings.Join(append(lines, "", s.subtle.Render("Enter select · Esc cancel")), "\n")
+	case "mode":
+		modes := []struct {
+			name, description string
+		}{
+			{"Simple", "Classify with local rules"},
+			{"Jev", "Classify with local rules and Jev"},
+		}
+		lines := []string{s.title.Render("Choose mode"), ""}
+		for index, mode := range modes {
+			line := fmt.Sprintf("  %-8s %s", mode.name, s.subtle.Render(mode.description))
+			if index == m.chooser {
+				line = s.selected.Width(46).Render("›" + line[1:])
+			}
+			lines = append(lines, line)
+		}
+		content = strings.Join(append(lines, "", s.subtle.Render("Enter rebuild plan · Esc cancel")), "\n")
+	case "notice":
+		content = s.danger.Bold(true).Render("Mode not changed") + "\n\n" + m.notice + "\n\n" + s.subtle.Render("Press Enter or Esc to close")
 	default:
 		action, id := m.overlay, "the current plan"
 		if action != "apply" && len(m.runs) > 0 {

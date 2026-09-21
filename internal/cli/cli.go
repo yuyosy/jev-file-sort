@@ -303,7 +303,7 @@ func runUI(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	program := tea.NewProgram(ui.New(target, cfg, classifier))
+	program := tea.NewProgram(ui.New(target, cfg, classifier, classifierForConfig))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
