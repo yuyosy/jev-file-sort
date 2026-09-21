@@ -29,7 +29,7 @@ func SetCategory(value *Plan, index int, categoryID string) error {
 	}
 	operation.Decision.Kind, operation.Decision.CategoryID, operation.Decision.RuleID = model.DecisionCategory, categoryID, ""
 	operation.Manual = true
-	operation.Destination = filepath.Join(value.OutputRoot, category.Directory, filepath.Base(operation.Source))
+	operation.Destination = destinationPath(value.OutputRoot, category.Directory, operation.RelativeSource, filepath.Base(operation.Source), value.Config.Output.Layout)
 	operation.Status, operation.Reason = "planned", ""
 	reserved := map[string]struct{}{}
 	for i := range value.Operations {

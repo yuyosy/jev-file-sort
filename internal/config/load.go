@@ -73,6 +73,9 @@ func merge(dst *Config, src Config) {
 	if src.Output.Collision != "" {
 		dst.Output.Collision = src.Output.Collision
 	}
+	if src.Output.Layout != "" {
+		dst.Output.Layout = src.Output.Layout
+	}
 	if src.Uncategorized.Action != "" {
 		dst.Uncategorized.Action = src.Uncategorized.Action
 	}

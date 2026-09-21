@@ -10,7 +10,7 @@ func Defaults() Config {
 			FollowSymlinks: Bool(false),
 		},
 		Folders:       Folders{RulesEnabled: Bool(true)},
-		Output:        Output{Root: "Sorted", Collision: "skip"},
+		Output:        Output{Root: "Sorted", Collision: "skip", Layout: "preserve"},
 		Uncategorized: Uncategorized{Action: "leave", Directory: "Unsorted"},
 		Jev: Jev{
 			Endpoint:       "https://api.typesafe.ai/v1/systemone",

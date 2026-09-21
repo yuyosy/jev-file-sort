@@ -218,7 +218,7 @@ func (b Builder) operation(entry Entry, classification Classification, outputRoo
 		op.Reason = "left in place by policy"
 		return op, nil
 	}
-	destination := filepath.Join(outputRoot, directory, entry.Name)
+	destination := destinationPath(outputRoot, directory, entry.Relative, entry.Name, b.Config.Output.Layout)
 	if samePath(entry.Path, destination) || within(destination, entry.Path) {
 		op.Status = "error"
 		op.Reason = "destination overlaps source"
@@ -355,6 +355,12 @@ func canonical(path string) string {
 	return cleaned
 }
 func samePath(a, b string) bool { return canonical(a) == canonical(b) }
+func destinationPath(outputRoot, categoryDirectory, relative, name, layout string) string {
+	if layout == "preserve" {
+		return filepath.Join(outputRoot, categoryDirectory, filepath.FromSlash(relative))
+	}
+	return filepath.Join(outputRoot, categoryDirectory, name)
+}
 func within(path, parent string) bool {
 	relative, err := filepath.Rel(parent, path)
 	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))

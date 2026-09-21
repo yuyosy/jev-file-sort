@@ -34,6 +34,9 @@ func Validate(cfg Config) []Diagnostic {
 	if cfg.Output.Collision != "skip" && cfg.Output.Collision != "number" {
 		errorf("output.collision", "must be skip or number")
 	}
+	if cfg.Output.Layout != "preserve" && cfg.Output.Layout != "flatten" {
+		errorf("output.layout", "must be preserve or flatten")
+	}
 	if cfg.Uncategorized.Action != "leave" && cfg.Uncategorized.Action != "move" {
 		errorf("uncategorized.action", "must be leave or move")
 	}

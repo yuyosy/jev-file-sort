@@ -47,6 +47,7 @@ folders:
 output:
   root: Sorted
   collision: skip
+  layout: preserve
 rules:
   - id: project-folders
     enabled: true
@@ -70,6 +71,8 @@ jev:
 ```
 
 Rules can target `file`, `folder`, or both. A matching folder rule moves the folder as one unit and does not classify its children individually. Override a built-in rule by using its rule ID, such as `preset-text`, and setting `enabled: false`.
+
+`output.layout: preserve` keeps the source-relative directories below each category, so files such as `internal/config/types.go` and `internal/execute/types.go` remain distinct. Set it to `flatten` to place every classified file directly below its category.
 
 ## Jev
 

@@ -37,6 +37,7 @@ type Folders struct {
 type Output struct {
 	Root      string `yaml:"root,omitempty" json:"root"`
 	Collision string `yaml:"collision,omitempty" json:"collision"`
+	Layout    string `yaml:"layout,omitempty" json:"layout"`
 }
 
 type Uncategorized struct {
