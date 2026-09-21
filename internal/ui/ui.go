@@ -2,8 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,22 +12,19 @@ import (
 )
 
 type Model struct {
-	root       string
-	config     config.Config
-	classifier plan.Classifier
-	plan       *plan.Plan
-	cursor     int
-	width      int
-	height     int
-	loading    bool
-	applying   bool
-	confirm    bool
-	err        error
-	result     *execute.Result
-	runs       []execute.Run
-	screen     string
-	action     string
-	cancel     context.CancelFunc
+	root                    string
+	config                  config.Config
+	classifier              plan.Classifier
+	plan                    *plan.Plan
+	result                  *execute.Result
+	runs                    []execute.Run
+	cursor, width, height   int
+	loading, applying, dark bool
+	screen, overlay, filter string
+	filtering               bool
+	chooser                 int
+	err                     error
+	cancel                  context.CancelFunc
 }
 
 type planMsg struct {
@@ -46,10 +41,10 @@ type historyMsg struct {
 }
 
 func New(root string, cfg config.Config, classifier plan.Classifier) Model {
-	return Model{root: root, config: cfg, classifier: classifier, loading: true, screen: "plan"}
+	return Model{root: root, config: cfg, classifier: classifier, loading: true, screen: "plan", dark: true}
 }
 
-func (m Model) Init() tea.Cmd { return m.buildPlan() }
+func (m Model) Init() tea.Cmd { return tea.Batch(m.buildPlan(), tea.RequestBackgroundColor) }
 
 func (m Model) buildPlan() tea.Cmd {
 	return func() tea.Msg {
@@ -62,6 +57,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = message.Width, message.Height
+	case tea.BackgroundColorMsg:
+		m.dark = message.IsDark()
 	case planMsg:
 		m.loading, m.err = false, message.err
 		if message.err == nil {
@@ -74,67 +71,156 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case historyMsg:
 		m.loading, m.err, m.runs = false, message.err, message.runs
-		if m.cursor >= len(m.runs) {
-			m.cursor = max(0, len(m.runs)-1)
-		}
+		m.clampCursor()
 	case tea.KeyPressMsg:
-		key := message.String()
-		if key == "ctrl+c" && m.applying && m.cancel != nil {
-			m.cancel()
-			return m, nil
-		}
-		if key == "ctrl+c" || (key == "q" && !m.applying) {
-			return m, tea.Quit
-		}
-		if m.loading || m.applying || m.plan == nil {
-			return m, nil
-		}
-		if m.screen == "history" {
-			return m.updateHistory(key)
-		}
-		switch key {
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-			m.confirm = false
-		case "down", "j":
-			if m.cursor+1 < len(m.plan.Operations) {
-				m.cursor++
-			}
-			m.confirm = false
-		case "space":
-			if len(m.plan.Operations) == 0 {
-				return m, nil
-			}
-			op := &m.plan.Operations[m.cursor]
-			if op.Status == "planned" {
-				op.Status, op.Reason = "skipped", "manually skipped"
-			} else if op.Reason == "manually skipped" {
-				op.Status, op.Reason = "planned", ""
-			}
-			m.confirm = false
-		case "c":
-			m.cycleCategory()
-			m.confirm = false
-		case "a":
-			if !m.confirm {
-				m.confirm = true
-				return m, nil
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			m.applying, m.confirm, m.cancel = true, false, cancel
-			value := *m.plan
-			return m, func() tea.Msg {
-				result, err := execute.Apply(ctx, value)
-				return applyMsg{result: result, err: err}
-			}
-		case "h":
-			m.screen, m.cursor, m.loading = "history", 0, true
-			return m, m.loadHistory()
-		}
+		return m.updateKey(message)
 	}
 	return m, nil
+}
+
+func (m Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := message.String()
+	if key == "ctrl+c" && m.applying && m.cancel != nil {
+		m.cancel()
+		return m, nil
+	}
+	if key == "ctrl+c" || (key == "q" && !m.applying && !m.filtering && m.overlay == "") {
+		return m, tea.Quit
+	}
+	if m.applying {
+		return m, nil
+	}
+	if m.filtering {
+		return m.updateFilter(message)
+	}
+	if m.overlay != "" {
+		return m.updateOverlay(key)
+	}
+	if key == "?" && !m.loading {
+		m.overlay = "help"
+		return m, nil
+	}
+	if m.loading || m.plan == nil {
+		return m, nil
+	}
+	if m.screen == "history" {
+		return m.updateHistory(key)
+	}
+	return m.updatePlan(key)
+}
+
+func (m Model) updatePlan(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor+1 < len(m.visibleOperations()) {
+			m.cursor++
+		}
+	case "/":
+		m.filtering = true
+	case "esc":
+		if m.filter != "" {
+			m.filter, m.cursor = "", 0
+		}
+	case "space":
+		index, ok := m.selectedOperation()
+		if !ok {
+			break
+		}
+		op := &m.plan.Operations[index]
+		if op.Status == "planned" {
+			op.Status, op.Reason = "skipped", "manually skipped"
+		} else if op.Reason == "manually skipped" {
+			op.Status, op.Reason = "planned", ""
+		}
+	case "c":
+		m.openCategoryChooser()
+	case "a":
+		m.overlay = "apply"
+	case "h":
+		m.screen, m.cursor, m.loading = "history", 0, true
+		return m, m.loadHistory()
+	}
+	return m, nil
+}
+
+func (m Model) updateFilter(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "enter":
+		m.filtering = false
+	case "esc":
+		m.filtering, m.filter = false, ""
+	case "backspace":
+		runes := []rune(m.filter)
+		if len(runes) > 0 {
+			m.filter = string(runes[:len(runes)-1])
+		}
+	default:
+		if message.Text != "" && !message.Mod.Contains(tea.ModCtrl) && !message.Mod.Contains(tea.ModAlt) {
+			m.filter += message.Text
+		}
+	}
+	m.cursor = 0
+	return m, nil
+}
+
+func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
+	if key == "esc" || key == "n" || key == "q" {
+		m.overlay = ""
+		return m, nil
+	}
+	if m.overlay == "help" {
+		if key == "?" || key == "enter" {
+			m.overlay = ""
+		}
+		return m, nil
+	}
+	if m.overlay == "category" {
+		categories := m.enabledCategories()
+		switch key {
+		case "up", "k":
+			if m.chooser > 0 {
+				m.chooser--
+			}
+		case "down", "j":
+			if m.chooser+1 < len(categories) {
+				m.chooser++
+			}
+		case "enter":
+			if index, ok := m.selectedOperation(); ok && len(categories) > 0 {
+				_ = plan.SetCategory(m.plan, index, categories[m.chooser].ID)
+			}
+			m.overlay = ""
+		}
+		return m, nil
+	}
+	if key != "enter" && key != "y" {
+		return m, nil
+	}
+	action := m.overlay
+	m.overlay = ""
+	ctx, cancel := context.WithCancel(context.Background())
+	m.applying, m.cancel = true, cancel
+	if action == "apply" {
+		value := *m.plan
+		return m, func() tea.Msg { result, err := execute.Apply(ctx, value); return applyMsg{result: result, err: err} }
+	}
+	if len(m.runs) == 0 {
+		m.applying, m.cancel = false, nil
+		return m, nil
+	}
+	id := m.runs[m.cursor].ID
+	return m, func() tea.Msg {
+		if action == "undo" {
+			result, err := execute.Undo(ctx, id, m.config.History.Directory)
+			return applyMsg{result: result, err: err}
+		}
+		result, err := execute.Redo(ctx, id, m.config.History.Directory)
+		return applyMsg{result: result, err: err}
+	}
 }
 
 func (m Model) loadHistory() tea.Cmd {
@@ -151,135 +237,98 @@ func (m Model) loadHistory() tea.Cmd {
 func (m Model) updateHistory(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc", "h":
-		m.screen, m.cursor, m.action = "plan", 0, ""
+		m.screen, m.cursor = "plan", 0
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
-		m.action = ""
 	case "down", "j":
 		if m.cursor+1 < len(m.runs) {
 			m.cursor++
 		}
-		m.action = ""
-	case "u", "r":
-		if len(m.runs) == 0 {
-			return m, nil
+	case "u":
+		if len(m.runs) > 0 {
+			m.overlay = "undo"
 		}
-		action := "undo"
-		if key == "r" {
-			action = "redo"
-		}
-		if m.action != action {
-			m.action = action
-			return m, nil
-		}
-		id := m.runs[m.cursor].ID
-		ctx, cancel := context.WithCancel(context.Background())
-		m.applying, m.action, m.cancel = true, "", cancel
-		return m, func() tea.Msg {
-			var result execute.Result
-			var err error
-			if action == "undo" {
-				result, err = execute.Undo(ctx, id, m.config.History.Directory)
-			} else {
-				result, err = execute.Redo(ctx, id, m.config.History.Directory)
-			}
-			return applyMsg{result: result, err: err}
+	case "r":
+		if len(m.runs) > 0 {
+			m.overlay = "redo"
 		}
 	}
 	return m, nil
 }
 
-func (m *Model) cycleCategory() {
-	if len(m.plan.Operations) == 0 || len(m.config.Categories) == 0 {
+func (m *Model) openCategoryChooser() {
+	index, ok := m.selectedOperation()
+	if !ok {
 		return
 	}
-	op := m.plan.Operations[m.cursor]
+	op := m.plan.Operations[index]
 	if op.Status == "excluded" || op.Status == "error" {
 		return
 	}
-	start := -1
-	for i, category := range m.config.Categories {
+	categories := m.enabledCategories()
+	if len(categories) == 0 {
+		return
+	}
+	m.chooser = 0
+	for index, category := range categories {
 		if category.ID == op.Decision.CategoryID {
-			start = i
+			m.chooser = index
 			break
 		}
 	}
-	for offset := 1; offset <= len(m.config.Categories); offset++ {
-		index := (start + offset) % len(m.config.Categories)
-		category := m.config.Categories[index]
+	m.overlay = "category"
+}
+
+func (m Model) enabledCategories() []config.Category {
+	var categories []config.Category
+	for _, category := range m.config.Categories {
 		if config.Enabled(category.Enabled) {
-			_ = plan.SetCategory(m.plan, m.cursor, category.ID)
-			return
+			categories = append(categories, category)
 		}
+	}
+	return categories
+}
+
+func (m Model) visibleOperations() []int {
+	if m.plan == nil {
+		return nil
+	}
+	query := strings.ToLower(strings.TrimSpace(m.filter))
+	indices := make([]int, 0, len(m.plan.Operations))
+	for index, operation := range m.plan.Operations {
+		haystack := strings.ToLower(strings.Join([]string{operation.RelativeSource, operation.Destination, operation.Status, string(operation.Kind), string(operation.Decision.Kind), operation.Decision.CategoryID, operation.Decision.RuleID}, " "))
+		if query == "" || strings.Contains(haystack, query) {
+			indices = append(indices, index)
+		}
+	}
+	return indices
+}
+
+func (m Model) selectedOperation() (int, bool) {
+	indices := m.visibleOperations()
+	if m.cursor < 0 || m.cursor >= len(indices) {
+		return 0, false
+	}
+	return indices[m.cursor], true
+}
+
+func (m *Model) clampCursor() {
+	length := len(m.runs)
+	if m.screen == "plan" {
+		length = len(m.visibleOperations())
+	}
+	if m.cursor >= length {
+		m.cursor = max(0, length-1)
 	}
 }
 
 func (m Model) View() tea.View {
-	var content strings.Builder
-	content.WriteString("jev-file-sort\n\n")
-	switch {
-	case m.loading:
-		content.WriteString("Building plan…\n")
-	case m.applying:
-		content.WriteString("Applying plan…\n")
-	case m.err != nil:
-		fmt.Fprintf(&content, "Error: %v\n\nPress q to quit.\n", m.err)
-	case m.result != nil:
-		fmt.Fprintf(&content, "Run %s: %s\n", m.result.RunID, m.result.Status)
-		for state, count := range m.result.Counts {
-			fmt.Fprintf(&content, "%s: %d\n", state, count)
-		}
-		content.WriteString("\nPress q to quit.\n")
-	case m.plan != nil:
-		if m.screen == "history" {
-			m.renderHistory(&content)
-			break
-		}
-		fmt.Fprintf(&content, "Target: %s\nOutput: %s\n\n", m.plan.Root, m.plan.OutputRoot)
-		start, end := visibleRange(m.cursor, len(m.plan.Operations), max(1, m.height-9))
-		for index := start; index < end; index++ {
-			op := m.plan.Operations[index]
-			marker := " "
-			if index == m.cursor {
-				marker = ">"
-			}
-			destination := op.Destination
-			if destination != "" {
-				destination = filepath.Base(filepath.Dir(destination)) + "/" + filepath.Base(destination)
-			}
-			fmt.Fprintf(&content, "%s %-9s %-12s %-28s %s\n", marker, op.Status, op.Decision.Kind, truncate(op.RelativeSource, 28), destination)
-		}
-		content.WriteString("\n↑/↓ or j/k move · space skip · c category · a apply · h history · q quit\n")
-		if m.confirm {
-			content.WriteString("Press a again to apply the displayed plan.\n")
-		}
-	}
-	view := tea.NewView(content.String())
+	view := tea.NewView(m.render())
 	view.AltScreen = true
 	view.WindowTitle = "jev-file-sort"
 	return view
-}
-
-func (m Model) renderHistory(content *strings.Builder) {
-	content.WriteString("History\n\n")
-	if len(m.runs) == 0 {
-		content.WriteString("No retained runs.\n")
-	}
-	start, end := visibleRange(m.cursor, len(m.runs), max(1, m.height-7))
-	for index := start; index < end; index++ {
-		marker := " "
-		if index == m.cursor {
-			marker = ">"
-		}
-		run := m.runs[index]
-		fmt.Fprintf(content, "%s %-24s %-14s %s\n", marker, run.ID, run.Status, run.CreatedAt.Format("2006-01-02 15:04"))
-	}
-	content.WriteString("\n↑/↓ or j/k move · u undo · r redo · h/Esc back · q quit\n")
-	if m.action != "" {
-		fmt.Fprintf(content, "Press %s again to confirm %s.\n", string(m.action[0]), m.action)
-	}
 }
 
 func visibleRange(cursor, length, limit int) (int, int) {
@@ -293,6 +342,7 @@ func visibleRange(cursor, length, limit int) (int, int) {
 	}
 	return start, end
 }
+
 func truncate(value string, width int) string {
 	runes := []rune(value)
 	if len(runes) <= width {

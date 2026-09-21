@@ -23,6 +23,8 @@ jev-sort redo <run-id>
 jev-sort ui ~/Downloads
 ```
 
+The UI shows operation details beside the plan on wide terminals. Use `/` to filter, `c` to choose a category, `space` to skip an operation, `h` for history, and `?` for the full key guide. Apply, undo, and redo use confirmation dialogs.
+
 `run` builds its plan in memory and does not create a plan file. It asks for confirmation in a terminal; use `--no-confirm` for explicit non-interactive execution and `--dry-run` to inspect the in-memory plan without moving anything. Use the separate `plan` and `apply` commands when the plan must be reviewed, retained, or applied later.
 
 Running `jev-sort` without a command opens the UI only when stdin and stdout are terminals. Planning never moves source files; `apply` revalidates source fingerprints and destinations before moving anything.
