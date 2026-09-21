@@ -8,6 +8,7 @@ import (
 
 	"jev-file-sort/internal/config"
 	"jev-file-sort/internal/execute"
+	"jev-file-sort/internal/model"
 	"jev-file-sort/internal/plan"
 )
 
@@ -140,7 +141,7 @@ func (m Model) updatePlan(key string) (tea.Model, tea.Cmd) {
 		} else if op.Reason == "manually skipped" {
 			op.Status, op.Reason = "planned", ""
 		}
-	case "c":
+	case "c", "right":
 		m.openCategoryChooser()
 	case "m":
 		m.openModeChooser()
@@ -174,7 +175,7 @@ func (m Model) updateFilter(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
-	if key == "esc" || key == "n" || key == "q" {
+	if key == "esc" || key == "left" || key == "n" || key == "q" {
 		m.overlay = ""
 		return m, nil
 	}
@@ -203,7 +204,11 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if index, ok := m.selectedOperation(); ok && len(categories) > 0 {
-				_ = plan.SetCategory(m.plan, index, categories[m.chooser].ID)
+				if err := plan.SetCategory(m.plan, index, categories[m.chooser].ID); err != nil {
+					m.notice = err.Error()
+					m.overlay = "notice"
+					return m, nil
+				}
 			}
 			m.overlay = ""
 		}
@@ -295,7 +300,7 @@ func (m Model) loadHistory() tea.Cmd {
 
 func (m Model) updateHistory(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "esc", "h":
+	case "esc", "left", "h":
 		m.screen, m.cursor = "plan", 0
 	case "up", "k":
 		if m.cursor > 0 {
@@ -323,7 +328,7 @@ func (m *Model) openCategoryChooser() {
 		return
 	}
 	op := m.plan.Operations[index]
-	if op.Status == "excluded" || op.Status == "error" {
+	if op.Kind != model.EntryFile && op.Kind != model.EntryFolder {
 		return
 	}
 	categories := m.enabledCategories()

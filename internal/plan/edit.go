@@ -20,6 +20,13 @@ func SetCategory(value *Plan, index int, categoryID string) error {
 	if operation.Kind != model.EntryFile && operation.Kind != model.EntryFolder {
 		return fmt.Errorf("entry cannot be categorized")
 	}
+	if operation.Fingerprint.SHA256 == "" {
+		fingerprint, err := FingerprintPath(operation.Source, operation.Kind)
+		if err != nil {
+			return fmt.Errorf("fingerprint entry: %w", err)
+		}
+		operation.Fingerprint = fingerprint
+	}
 	operation.Decision.Kind, operation.Decision.CategoryID, operation.Decision.RuleID = model.DecisionCategory, categoryID, ""
 	operation.Manual = true
 	operation.Destination = filepath.Join(value.OutputRoot, category.Directory, filepath.Base(operation.Source))

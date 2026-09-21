@@ -102,10 +102,12 @@ func (m Model) renderOperationList(s styles, width, height int) string {
 		if category == "" {
 			category = string(op.Decision.Kind)
 		}
-		available := max(8, width-24)
-		line := fmt.Sprintf("%s%s %-*s %s", marker, statusGlyph(op.Status), available, truncate(op.RelativeSource, available), truncate(category, 14))
+		lineWidth := max(24, width-8)
+		categoryWidth := 14
+		sourceWidth := max(8, lineWidth-21)
+		line := marker + fitWidth(statusGlyph(op.Status), 3) + " " + fitWidth(op.RelativeSource, sourceWidth) + " " + fitWidth(category, categoryWidth)
 		if position == m.cursor {
-			line = s.selected.Width(max(1, width-4)).Render(line)
+			line = s.selected.Width(lineWidth).Render(line)
 		} else if op.Status == "skipped" || op.Status == "excluded" {
 			line = s.subtle.Render(line)
 		}
@@ -198,7 +200,7 @@ func (m Model) renderFooter(s styles, width int) string {
 	if m.screen == "history" {
 		help = keyHelp(s, "↑↓", "move", "u", "undo", "r", "redo", "h", "back", "?", "help", "q", "quit")
 	} else {
-		help = keyHelp(s, "↑↓", "move", "space", "skip", "c", "category", "m", "mode", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
+		help = keyHelp(s, "↑↓", "move", "→/c", "category", "space", "skip", "m", "mode", "/", "filter", "a", "apply", "h", "history", "?", "help", "q", "quit")
 	}
 	if m.filter != "" {
 		help = s.accent.Render("filter: "+m.filter) + "  " + help
@@ -210,17 +212,17 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 	var content string
 	switch m.overlay {
 	case "help":
-		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "c", "choose category"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "Esc", "close or clear"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
+		content = s.title.Render("Keyboard help") + "\n\n" + strings.Join([]string{keyHelp(s, "↑/↓ j/k", "move selection"), keyHelp(s, "space", "skip or restore operation"), keyHelp(s, "→ / c", "choose category"), keyHelp(s, "← / Esc", "go back"), keyHelp(s, "m", "switch Simple / Jev mode"), keyHelp(s, "/", "filter operations"), keyHelp(s, "a", "apply plan"), keyHelp(s, "h", "toggle history"), keyHelp(s, "q", "quit")}, "\n") + "\n\n" + s.subtle.Render("Press ? or Enter to close")
 	case "category":
 		lines := []string{s.title.Render("Choose category"), ""}
 		for index, category := range m.enabledCategories() {
 			line := "  " + category.Name + "  " + s.subtle.Render(category.ID)
 			if index == m.chooser {
-				line = s.selected.Width(36).Render("›" + line[1:])
+				line = s.selected.Width(36).Render(">" + line[1:])
 			}
 			lines = append(lines, line)
 		}
-		content = strings.Join(append(lines, "", s.subtle.Render("Enter select · Esc cancel")), "\n")
+		content = strings.Join(append(lines, "", s.subtle.Render("Enter select · ←/Esc back")), "\n")
 	case "mode":
 		modes := []struct {
 			name, description string
@@ -268,6 +270,10 @@ func keyHelp(s styles, pairs ...string) string {
 func labelValue(s styles, label, value string) string {
 	return s.subtle.Width(12).Render(label) + value
 }
+func fitWidth(value string, width int) string {
+	value = ansi.Truncate(value, width, "…")
+	return value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
+}
 func emptyValue(value string) string {
 	if value == "" {
 		return "—"
@@ -283,12 +289,12 @@ func upperFirst(value string) string {
 func statusGlyph(status string) string {
 	switch status {
 	case "planned":
-		return "●"
+		return "[X]"
 	case "skipped", "excluded":
-		return "○"
+		return "[-]"
 	case "error", "failed":
-		return "×"
+		return "[E]"
 	default:
-		return "·"
+		return "[ ]"
 	}
 }

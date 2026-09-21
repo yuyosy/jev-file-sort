@@ -23,7 +23,7 @@ jev-sort redo <run-id>
 jev-sort ui ~/Downloads
 ```
 
-The UI shows operation details beside the plan on wide terminals. Use `m` to switch between Simple and Jev modes, `/` to filter, `c` to choose a category, `space` to skip an operation, `h` for history, and `?` for the full key guide. Apply, undo, and redo use confirmation dialogs.
+The UI shows operation details beside the plan on wide terminals. Use `→` or `c` to choose a category (including for entries skipped by default), `←` to go back, `m` to switch between Simple and Jev modes, `/` to filter, `space` to skip an operation, `h` for history, and `?` for the full key guide. Apply, undo, and redo use confirmation dialogs.
 
 `run` builds its plan in memory and does not create a plan file. It asks for confirmation in a terminal; use `--no-confirm` for explicit non-interactive execution and `--dry-run` to inspect the in-memory plan without moving anything. Use the separate `plan` and `apply` commands when the plan must be reviewed, retained, or applied later.
 
