@@ -19,6 +19,7 @@ func Defaults() Config {
 			TimeoutSeconds: 30,
 			MaxRetries:     3,
 			Concurrency:    4,
+			BatchSize:      100,
 			FolderEvaluation: FolderEvaluation{
 				Enabled:    Bool(false),
 				MaxEntries: 100,

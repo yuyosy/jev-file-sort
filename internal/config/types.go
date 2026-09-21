@@ -59,6 +59,7 @@ type Jev struct {
 	TimeoutSeconds   int              `yaml:"timeout_seconds,omitempty" json:"timeout_seconds"`
 	MaxRetries       int              `yaml:"max_retries,omitempty" json:"max_retries"`
 	Concurrency      int              `yaml:"concurrency,omitempty" json:"concurrency"`
+	BatchSize        int              `yaml:"batch_size,omitempty" json:"batch_size"`
 	FolderEvaluation FolderEvaluation `yaml:"folder_evaluation,omitempty" json:"folder_evaluation"`
 	Content          Content          `yaml:"content,omitempty" json:"content"`
 }

@@ -23,6 +23,15 @@ type Classifier interface {
 	Classify(ctx context.Context, entry Entry) (Classification, error)
 }
 
+type BatchClassifier interface {
+	ClassifyBatch(ctx context.Context, entries []Entry) []ClassificationResult
+}
+
+type ClassificationResult struct {
+	Classification Classification
+	Err            error
+}
+
 type Classification struct {
 	Decision          model.Decision
 	ContentSent       bool
@@ -86,10 +95,12 @@ func (b Builder) Build(ctx context.Context, root string) (Plan, error) {
 		if readErr != nil {
 			return Plan{}, readErr
 		}
+		inputs := make([]visitInput, 0, len(entries))
 		for _, child := range entries {
-			if err := b.visit(ctx, &value, filepath.Join(absoluteRoot, child.Name()), child.Name(), 0, outputRoot, reserved); err != nil {
-				return Plan{}, err
-			}
+			inputs = append(inputs, visitInput{path: filepath.Join(absoluteRoot, child.Name()), relative: child.Name()})
+		}
+		if err := b.visitMany(ctx, &value, inputs, 0, outputRoot, reserved); err != nil {
+			return Plan{}, err
 		}
 	} else {
 		if err := b.visit(ctx, &value, absoluteRoot, filepath.Base(absoluteRoot), 0, outputRoot, reserved); err != nil {
@@ -99,17 +110,64 @@ func (b Builder) Build(ctx context.Context, root string) (Plan, error) {
 	return value, nil
 }
 
+type visitInput struct {
+	path     string
+	relative string
+}
+
+type visitItem struct {
+	entry          Entry
+	included       bool
+	skip           bool
+	terminal       *Operation
+	classification ClassificationResult
+}
+
 func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, depth int, outputRoot string, reserved map[string]struct{}) error {
+	return b.visitMany(ctx, value, []visitInput{{path: path, relative: relative}}, depth, outputRoot, reserved)
+}
+
+func (b Builder) visitMany(ctx context.Context, value *Plan, inputs []visitInput, depth int, outputRoot string, reserved map[string]struct{}) error {
+	items := make([]visitItem, len(inputs))
+	var classifyEntries []Entry
+	var classifyIndexes []int
+	for index, input := range inputs {
+		item, err := b.prepareVisit(ctx, input, depth, outputRoot)
+		if err != nil {
+			return err
+		}
+		items[index] = item
+		if !item.skip && item.terminal == nil && item.included {
+			classifyIndexes = append(classifyIndexes, index)
+			classifyEntries = append(classifyEntries, item.entry)
+		}
+	}
+	results := b.classify(ctx, classifyEntries)
+	if len(results) != len(classifyIndexes) {
+		return fmt.Errorf("classifier returned %d results for %d entries", len(results), len(classifyIndexes))
+	}
+	for index, itemIndex := range classifyIndexes {
+		items[itemIndex].classification = results[index]
+	}
+	for index := range items {
+		if err := b.processVisit(ctx, value, items[index], depth, outputRoot, reserved); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b Builder) prepareVisit(ctx context.Context, input visitInput, depth int, outputRoot string) (visitItem, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return visitItem{}, err
 	}
-	if within(path, outputRoot) {
-		return nil
+	if within(input.path, outputRoot) {
+		return visitItem{skip: true}, nil
 	}
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(input.path)
 	if err != nil {
-		value.Operations = append(value.Operations, errorOperation(path, relative, err))
-		return nil
+		op := errorOperation(input.path, input.relative, err)
+		return visitItem{terminal: &op}, nil
 	}
 	kind := model.EntryFile
 	if info.Mode()&os.ModeSymlink != 0 {
@@ -117,53 +175,75 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 	} else if info.IsDir() {
 		kind = model.EntryFolder
 	}
-	entry := Entry{Path: path, Relative: filepath.ToSlash(relative), Name: info.Name(), Kind: kind, Depth: depth, Info: info}
+	entry := Entry{Path: input.path, Relative: filepath.ToSlash(input.relative), Name: info.Name(), Kind: kind, Depth: depth, Info: info}
 	if kind == model.EntryFolder {
-		entry.Children, _ = readChildren(path)
+		entry.Children, _ = readChildren(input.path)
 	}
 
 	if hidden(entry.Name) && !config.Enabled(b.Config.Scan.IncludeHidden) {
-		value.Operations = append(value.Operations, excludedOperation(entry, "hidden entry"))
-		return nil
+		op := excludedOperation(entry, "hidden entry")
+		return visitItem{entry: entry, terminal: &op}, nil
 	}
 	excluded, err := matchesAny(b.Config.Selection.Exclude, entry.Relative, entry.Name)
 	if err != nil {
-		return err
+		return visitItem{}, err
 	}
 	if excluded {
-		value.Operations = append(value.Operations, excludedOperation(entry, "excluded by pattern"))
-		return nil
+		op := excludedOperation(entry, "excluded by pattern")
+		return visitItem{entry: entry, terminal: &op}, nil
 	}
 	if kind == model.EntrySymlink {
-		value.Operations = append(value.Operations, excludedOperation(entry, "symlinks are not followed"))
-		return nil
+		op := excludedOperation(entry, "symlinks are not followed")
+		return visitItem{entry: entry, terminal: &op}, nil
 	}
 	included := len(b.Config.Selection.Include) == 0
 	if !included {
 		included, err = matchesAny(b.Config.Selection.Include, entry.Relative, entry.Name)
 		if err != nil {
-			return err
+			return visitItem{}, err
 		}
 	}
+	return visitItem{entry: entry, included: included}, nil
+}
 
-	if included {
-		classification, classifyErr := b.Classifier.Classify(ctx, entry)
+func (b Builder) classify(ctx context.Context, entries []Entry) []ClassificationResult {
+	if batch, ok := b.Classifier.(BatchClassifier); ok {
+		return batch.ClassifyBatch(ctx, entries)
+	}
+	results := make([]ClassificationResult, len(entries))
+	for index, entry := range entries {
+		results[index].Classification, results[index].Err = b.Classifier.Classify(ctx, entry)
+	}
+	return results
+}
+
+func (b Builder) processVisit(ctx context.Context, value *Plan, item visitItem, depth int, outputRoot string, reserved map[string]struct{}) error {
+	if item.skip {
+		return nil
+	}
+	if item.terminal != nil {
+		value.Operations = append(value.Operations, *item.terminal)
+		return nil
+	}
+	entry := item.entry
+	if item.included {
+		classification, classifyErr := item.classification.Classification, item.classification.Err
 		decision := classification.Decision
 		if classifyErr != nil {
-			value.Operations = append(value.Operations, errorOperation(path, relative, classifyErr))
-			if kind != model.EntryFolder {
+			value.Operations = append(value.Operations, errorOperation(entry.Path, entry.Relative, classifyErr))
+			if entry.Kind != model.EntryFolder {
 				return nil
 			}
-		} else if decision.Kind == model.DecisionCategory || (kind != model.EntryFolder && decision.Kind == model.DecisionUncategorized) {
+		} else if decision.Kind == model.DecisionCategory || (entry.Kind != model.EntryFolder && decision.Kind == model.DecisionUncategorized) {
 			operation, planErr := b.operation(entry, classification, outputRoot, reserved)
 			if planErr != nil {
 				return planErr
 			}
 			value.Operations = append(value.Operations, operation)
-			if kind == model.EntryFolder {
+			if entry.Kind == model.EntryFolder {
 				return nil
 			}
-		} else if kind != model.EntryFolder {
+		} else if entry.Kind != model.EntryFolder {
 			operation, planErr := b.operation(entry, classification, outputRoot, reserved)
 			if planErr != nil {
 				return planErr
@@ -173,7 +253,7 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 			value.Operations = append(value.Operations, Operation{ID: randomID(), Source: entry.Path, RelativeSource: entry.Relative, Kind: entry.Kind, Decision: decision, Status: "unchanged", Reason: "folder contents will be classified individually", FolderSummarySent: true})
 		}
 	}
-	if kind != model.EntryFolder {
+	if entry.Kind != model.EntryFolder {
 		return nil
 	}
 	if !config.Enabled(b.Config.Scan.Recursive) {
@@ -182,18 +262,16 @@ func (b Builder) visit(ctx context.Context, value *Plan, path, relative string, 
 	if b.Config.Scan.MaxDepth != nil && depth >= *b.Config.Scan.MaxDepth {
 		return nil
 	}
-	children, err := os.ReadDir(path)
+	children, err := os.ReadDir(entry.Path)
 	if err != nil {
-		value.Operations = append(value.Operations, errorOperation(path, relative, err))
+		value.Operations = append(value.Operations, errorOperation(entry.Path, entry.Relative, err))
 		return nil
 	}
+	inputs := make([]visitInput, 0, len(children))
 	for _, child := range children {
-		childRelative := filepath.Join(relative, child.Name())
-		if err := b.visit(ctx, value, filepath.Join(path, child.Name()), childRelative, depth+1, outputRoot, reserved); err != nil {
-			return err
-		}
+		inputs = append(inputs, visitInput{path: filepath.Join(entry.Path, child.Name()), relative: filepath.Join(entry.Relative, child.Name())})
 	}
-	return nil
+	return b.visitMany(ctx, value, inputs, depth+1, outputRoot, reserved)
 }
 
 func (b Builder) operation(entry Entry, classification Classification, outputRoot string, reserved map[string]struct{}) (Operation, error) {

@@ -61,6 +61,9 @@ func Validate(cfg Config) []Diagnostic {
 	if cfg.Jev.Concurrency <= 0 {
 		errorf("jev.concurrency", "must be greater than zero")
 	}
+	if cfg.Jev.BatchSize <= 0 {
+		errorf("jev.batch_size", "must be greater than zero")
+	}
 	if cfg.Jev.FolderEvaluation.MaxEntries <= 0 {
 		errorf("jev.folder_evaluation.max_entries", "must be greater than zero")
 	}

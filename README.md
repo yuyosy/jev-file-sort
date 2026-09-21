@@ -61,6 +61,8 @@ rules:
     kinds: [file]
     category: text
 jev:
+  concurrency: 4
+  batch_size: 100
   folder_evaluation:
     enabled: false
     max_entries: 100
@@ -84,6 +86,8 @@ jev-sort plan ~/Downloads --mode jev --out plan.json
 ```
 
 File content is never sent unless content is enabled in the configuration, the file matches an allow pattern, and `plan` is invoked with `--allow-content`. Jev folder evaluation sends folder metadata and a bounded summary of direct children; it can either categorize the whole folder or continue into its children.
+
+Jev mode applies deterministic rules first and only sends unresolved entries to the API. Unresolved siblings are submitted as multiple questions in a shared request, split by `jev.batch_size`, with up to `jev.concurrency` batches in flight. Requests rejected for token size are divided automatically. This keeps common extensions local while retaining semantic classification for ambiguous names and content.
 
 ## License
 

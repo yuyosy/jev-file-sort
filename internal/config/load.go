@@ -152,6 +152,9 @@ func mergeJev(dst *Jev, src Jev) {
 	if src.Concurrency != 0 {
 		dst.Concurrency = src.Concurrency
 	}
+	if src.BatchSize != 0 {
+		dst.BatchSize = src.BatchSize
+	}
 	if src.FolderEvaluation.Enabled != nil {
 		dst.FolderEvaluation.Enabled = src.FolderEvaluation.Enabled
 	}
