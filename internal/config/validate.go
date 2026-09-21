@@ -43,8 +43,8 @@ func Validate(cfg Config) []Diagnostic {
 	if cfg.Scan.MaxDepth != nil && *cfg.Scan.MaxDepth < 0 {
 		errorf("scan.max_depth", "must be zero or greater")
 	}
-	if cfg.Content.MaxBytes < 0 {
-		errorf("content.max_bytes", "must be zero or greater")
+	if cfg.Jev.Content.MaxBytes < 0 {
+		errorf("jev.content.max_bytes", "must be zero or greater")
 	}
 	if cfg.Jev.Threshold < 0 || cfg.Jev.Threshold > 1 {
 		errorf("jev.threshold", "must be between zero and one")

@@ -75,12 +75,16 @@ func (m Model) renderHeader(s styles, width int) string {
 		return line + "\n"
 	}
 	meta := fmt.Sprintf("%s  →  %s  ·  %s", m.plan.Root, m.plan.OutputRoot, m.plan.Mode)
-	folderMode := "contents"
-	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
-		folderMode = "rules"
-		if m.plan.Mode == "jev" {
-			folderMode = "rules + Jev"
-		}
+	var folderParts []string
+	if config.Enabled(m.config.Folders.RulesEnabled) {
+		folderParts = append(folderParts, "rules")
+	}
+	if m.plan.Mode == "jev" && config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+		folderParts = append(folderParts, "Jev")
+	}
+	folderMode := strings.Join(folderParts, " + ")
+	if folderMode == "" {
+		folderMode = "contents"
 	}
 	meta += "  ·  folders: " + folderMode
 	return line + "\n" + s.subtle.Render(truncate(meta, max(1, width-1)))
@@ -250,13 +254,12 @@ func (m Model) renderOverlay(s styles, page string, width, height int) string {
 		}
 		content = strings.Join(append(lines, "", s.subtle.Render("Enter rebuild plan · Esc cancel")), "\n")
 	case "folder-mode":
-		folderDescription := "Evaluate matching folder rules"
-		if m.config.Mode == "jev" {
-			folderDescription = "Evaluate folder rules, then ask Jev"
-		}
 		modes := []struct{ name, description string }{
 			{"Contents", "Descend and classify contained entries"},
-			{"Folders", folderDescription},
+			{"Rules", "Evaluate matching folder rules"},
+		}
+		if m.config.Mode == "jev" {
+			modes = append(modes, struct{ name, description string }{"Rules + Jev", "Then ask Jev when no rule matches"})
 		}
 		lines := []string{s.title.Render("Choose folder evaluation"), ""}
 		for index, mode := range modes {

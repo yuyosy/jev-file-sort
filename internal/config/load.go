@@ -64,6 +64,9 @@ func merge(dst *Config, src Config) {
 	}
 	mergeSelection(&dst.Selection, src.Selection)
 	mergeScan(&dst.Scan, src.Scan)
+	if src.Folders.RulesEnabled != nil {
+		dst.Folders.RulesEnabled = src.Folders.RulesEnabled
+	}
 	if src.Output.Root != "" {
 		dst.Output.Root = src.Output.Root
 	}
@@ -75,15 +78,6 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Uncategorized.Directory != "" {
 		dst.Uncategorized.Directory = src.Uncategorized.Directory
-	}
-	if src.Content.Enabled != nil {
-		dst.Content.Enabled = src.Content.Enabled
-	}
-	if src.Content.AllowPatterns != nil {
-		dst.Content.AllowPatterns = src.Content.AllowPatterns
-	}
-	if src.Content.MaxBytes != 0 {
-		dst.Content.MaxBytes = src.Content.MaxBytes
 	}
 	mergeJev(&dst.Jev, src.Jev)
 	if src.History.Enabled != nil {
@@ -160,6 +154,15 @@ func mergeJev(dst *Jev, src Jev) {
 	}
 	if src.FolderEvaluation.MaxEntries != 0 {
 		dst.FolderEvaluation.MaxEntries = src.FolderEvaluation.MaxEntries
+	}
+	if src.Content.Enabled != nil {
+		dst.Content.Enabled = src.Content.Enabled
+	}
+	if src.Content.AllowPatterns != nil {
+		dst.Content.AllowPatterns = src.Content.AllowPatterns
+	}
+	if src.Content.MaxBytes != 0 {
+		dst.Content.MaxBytes = src.Content.MaxBytes
 	}
 }
 

@@ -2,6 +2,12 @@
 
 `jev-file-sort` is a cross-platform file sorting CLI and Bubble Tea UI. It can classify with deterministic extension and path rules or with TypeSafe Jev.
 
+> [!NOTE]
+> This project is under development.  
+> Features and behavior may change as development progresses.  
+> **Features related to Jev are not yet optimized, so their accuracy may be limited.**  
+> 
+
 ## Build
 
 ```sh
@@ -36,6 +42,8 @@ version: 1
 mode: simple
 scan:
   recursive: true
+folders:
+  rules_enabled: true
 output:
   root: Sorted
   collision: skip
@@ -51,6 +59,14 @@ rules:
     enabled: false
     kinds: [file]
     category: text
+jev:
+  folder_evaluation:
+    enabled: false
+    max_entries: 100
+  content:
+    enabled: false
+    allow_patterns: []
+    max_bytes: 32768
 ```
 
 Rules can target `file`, `folder`, or both. A matching folder rule moves the folder as one unit and does not classify its children individually. Override a built-in rule by using its rule ID, such as `preset-text`, and setting `enabled: false`.

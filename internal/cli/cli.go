@@ -584,7 +584,7 @@ func buildPlanInMemory(args []string, stderr io.Writer) (plan.Plan, int) {
 	if excludes != nil {
 		cfg.Selection.Exclude = excludes
 	}
-	cfg.Content.Authorized = *allowContent
+	cfg.Jev.Content.Authorized = *allowContent
 	diagnostics := config.Validate(cfg)
 	if config.HasErrors(diagnostics) {
 		writeDiagnostics(stderr, diagnostics)
@@ -671,7 +671,7 @@ func runPlan(args []string, stdout, stderr io.Writer) int {
 	if excludes != nil {
 		cfg.Selection.Exclude = excludes
 	}
-	cfg.Content.Authorized = *allowContent
+	cfg.Jev.Content.Authorized = *allowContent
 	diagnostics := config.Validate(cfg)
 	if config.HasErrors(diagnostics) {
 		writeDiagnostics(stderr, diagnostics)

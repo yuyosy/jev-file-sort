@@ -138,20 +138,20 @@ func (j Jev) state(entry plan.Entry) (any, bool, bool, error) {
 		return nil, false, false, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, j.Config.Content.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, j.Config.Jev.Content.MaxBytes+1))
 	if err != nil {
 		return nil, false, false, err
 	}
-	truncated := int64(len(data)) > j.Config.Content.MaxBytes
+	truncated := int64(len(data)) > j.Config.Jev.Content.MaxBytes
 	if truncated {
-		data = data[:j.Config.Content.MaxBytes]
+		data = data[:j.Config.Jev.Content.MaxBytes]
 	}
 	state["content"], state["content_truncated"] = string(data), truncated
 	return state, true, false, nil
 }
 
 func (j Jev) contentAllowed(entry plan.Entry) (bool, error) {
-	if !config.Enabled(j.Config.Content.Enabled) || !j.Config.Content.Authorized || len(j.Config.Content.AllowPatterns) == 0 || j.Config.Content.MaxBytes <= 0 {
+	if !config.Enabled(j.Config.Jev.Content.Enabled) || !j.Config.Jev.Content.Authorized || len(j.Config.Jev.Content.AllowPatterns) == 0 || j.Config.Jev.Content.MaxBytes <= 0 {
 		return false, nil
 	}
 	textExtensions := []string{".txt", ".md", ".rst", ".csv", ".tsv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".log"}
@@ -166,7 +166,7 @@ func (j Jev) contentAllowed(entry plan.Entry) (bool, error) {
 	if !supported {
 		return false, nil
 	}
-	for _, candidate := range j.Config.Content.AllowPatterns {
+	for _, candidate := range j.Config.Jev.Content.AllowPatterns {
 		matched, err := matchpattern.Match(candidate, entry.Relative, entry.Name)
 		if err != nil {
 			return false, err

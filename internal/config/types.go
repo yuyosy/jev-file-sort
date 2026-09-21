@@ -7,9 +7,9 @@ type Config struct {
 	Mode          string        `yaml:"mode,omitempty" json:"mode"`
 	Selection     Selection     `yaml:"selection,omitempty" json:"selection"`
 	Scan          Scan          `yaml:"scan,omitempty" json:"scan"`
+	Folders       Folders       `yaml:"folders,omitempty" json:"folders"`
 	Output        Output        `yaml:"output,omitempty" json:"output"`
 	Uncategorized Uncategorized `yaml:"uncategorized,omitempty" json:"uncategorized"`
-	Content       Content       `yaml:"content,omitempty" json:"content"`
 	Jev           Jev           `yaml:"jev,omitempty" json:"jev"`
 	History       History       `yaml:"history,omitempty" json:"history"`
 	Categories    []Category    `yaml:"categories,omitempty" json:"categories"`
@@ -28,6 +28,10 @@ type Scan struct {
 	MaxDepth       *int  `yaml:"max_depth,omitempty" json:"max_depth,omitempty"`
 	IncludeHidden  *bool `yaml:"include_hidden,omitempty" json:"include_hidden"`
 	FollowSymlinks *bool `yaml:"follow_symlinks,omitempty" json:"follow_symlinks"`
+}
+
+type Folders struct {
+	RulesEnabled *bool `yaml:"rules_enabled,omitempty" json:"rules_enabled"`
 }
 
 type Output struct {
@@ -55,6 +59,7 @@ type Jev struct {
 	MaxRetries       int              `yaml:"max_retries,omitempty" json:"max_retries"`
 	Concurrency      int              `yaml:"concurrency,omitempty" json:"concurrency"`
 	FolderEvaluation FolderEvaluation `yaml:"folder_evaluation,omitempty" json:"folder_evaluation"`
+	Content          Content          `yaml:"content,omitempty" json:"content"`
 }
 
 type FolderEvaluation struct {

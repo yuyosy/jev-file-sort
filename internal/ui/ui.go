@@ -232,13 +232,17 @@ func (m Model) updateOverlay(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.overlay == "folder-mode" {
+		last := 1
+		if m.config.Mode == "jev" {
+			last = 2
+		}
 		switch key {
 		case "up", "k":
 			if m.chooser > 0 {
 				m.chooser--
 			}
 		case "down", "j":
-			if m.chooser < 1 {
+			if m.chooser < last {
 				m.chooser++
 			}
 		case "enter":
@@ -282,20 +286,28 @@ func (m *Model) openModeChooser() {
 
 func (m *Model) openFolderModeChooser() {
 	m.chooser = 0
-	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+	if config.Enabled(m.config.Folders.RulesEnabled) {
 		m.chooser = 1
+	}
+	if m.config.Mode == "jev" && config.Enabled(m.config.Jev.FolderEvaluation.Enabled) {
+		m.chooser = 2
 	}
 	m.overlay = "folder-mode"
 }
 
 func (m Model) selectFolderMode() (tea.Model, tea.Cmd) {
-	enabled := m.chooser == 1
-	if config.Enabled(m.config.Jev.FolderEvaluation.Enabled) == enabled {
+	rulesEnabled := m.chooser >= 1
+	jevEnabled := config.Enabled(m.config.Jev.FolderEvaluation.Enabled)
+	if m.config.Mode == "jev" {
+		jevEnabled = m.chooser == 2
+	}
+	if config.Enabled(m.config.Folders.RulesEnabled) == rulesEnabled && config.Enabled(m.config.Jev.FolderEvaluation.Enabled) == jevEnabled {
 		m.overlay = ""
 		return m, nil
 	}
 	nextConfig := m.config
-	nextConfig.Jev.FolderEvaluation.Enabled = config.Bool(enabled)
+	nextConfig.Folders.RulesEnabled = config.Bool(rulesEnabled)
+	nextConfig.Jev.FolderEvaluation.Enabled = config.Bool(jevEnabled)
 	classifier, err := m.classifierFactory(nextConfig)
 	if err != nil {
 		m.notice = err.Error()
